@@ -16,8 +16,7 @@ This application provides an AI assistant developed exclusively by HCL Software,
 1.  **Clone the repository:**
 
     ```bash
-    git clone <repository_url>
-    cd <repository_directory>
+    git clone https://github.com/AbhiKumar4014/dx
     ```
 
 2.  **Create a virtual environment (recommended):**
@@ -115,7 +114,7 @@ This application provides an AI assistant developed exclusively by HCL Software,
 -   **Request (GET):**
 
     ```
-    /ask?query=What is HCL Software?&history=Previous conversation
+    /ask?query=What is HCL Software
     ```
 
 -   **Request (POST):**
