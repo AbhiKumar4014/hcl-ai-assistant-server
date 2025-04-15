@@ -12,7 +12,7 @@ import requests
 def extract_text_from_url(url: str) -> dict:
     # logging.info(f"Extracting text from URL: {url}")
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=60)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
