@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 app = Flask(__name__)
 CORS(app)  # Enable CORS
 
-# qa_chain = load_model_data(source_type="json_file", source_data="hcl_sites_data.json") 
+# qa_chain = load_model_data(source_type="json_file", source_data="hcl_sites_data.json")
 qa_chain = None
 qa_chain = load_model_data()
 
@@ -36,7 +36,6 @@ def load():
 
     qa_chain = load_model_data(context, source_type="json_object")
     if qa_chain is not None:
-        print(qa_chain)
         logging.info("Model loaded successfully")
         return jsonify({"message": "Model loaded successfully"})
     else:
@@ -114,4 +113,4 @@ def ask():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000, debug=False)
+    app.run(host="0.0.0.0", port=3000, debug=True)
