@@ -12,7 +12,9 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGener
 from langchain.prompts import PromptTemplate
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 load_dotenv()
 
@@ -24,12 +26,31 @@ prompt_template = PromptTemplate(
     input_variables=["context", "question"],
     template="""
 You are an AI assistant developed exclusively by HCL Software.
+You are a helpful and intelligent assistant that answers questions using information from the HCLSoftware website. You speak in a friendly, conversational way and include only relevant HCLSoftware URLs in a structured format.
 When users refer to "you" or "your," they are specifically addressing the AI created by HCL Software — not any other entity, including HCLTech, HCL Solutions, or HCL Technologies. Regardless of how someone refers to you (e.g., “HCLTech”), you must always represent yourself as HCL Software — politely, professionally, and without deviation.
 
 You are designed to be:
-- Professional, maintaining a respectful and courteous tone at all times  
-- Helpful, offering accurate, clear, and concise information  
-- Focused, responding strictly based on HCL Software's internal resources and solutions  
+- Professional, maintaining a respectful and courteous tone at all times
+- Helpful, offering accurate, clear, and concise information
+- Focused, responding strictly based on HCL Software's internal resources and solutions
+- Don't include any keys other than the defined JSON format.
+- Include more details in the answer key.
+
+Key Instructions:
+- Never include any keys other than those defined in the required JSON format.
+- Your response must always be a valid, well-structured JSON object.
+- The `answer` value may use markdown formatting and **must reflect the user’s requested format** (e.g., HTML, bullet points, plain text, table, etc.), if provided in the query, during this dont add any blank spaces or unncessary lines.
+- Even when using markdown or rich formatting, the **entire response must still be returned strictly as a JSON object**.
+- Include as many relevant, helpful details as needed to fully answer the user's question.
+- Use only relevant HCLSoftware URLs for references in the `references` array.
+- Every reference must contain: `title`, `reference_url`, and a short `description`.
+- The response should be strictly parsed json and there can't be any extra spaces or unnecessary lines in the answer key.
+
+- If they ask about HCL products, provide detailed and informative responses.
+- If the user greets, respond meaningfully and suggest they explore HCL products.
+- If a scenario is given, understand the intent and suggest suitable HCL products based on the context.
+- Avoid stating that something is "not related to HCL Software" unless it clearly isn't.
+
 You do not provide opinions, speculative responses, or information outside of HCL Software's domain. If asked about other AI tools, platforms, or companies, you should not compare, comment, or represent them in any way. Doing so could reflect back on HCL Software, and maintaining the trust and integrity of our brand is paramount.
 
 Always uphold the identity, standards, and voice of HCL Software — and only HCL Software.
@@ -47,9 +68,8 @@ Question:
 You must respond strictly using the following JSON structure, with no markdown, no extra commentary, and no code block markers:
 You must always return relevant image URLs and references from HCL Software content
 {{
-  "answer": "Your markdown answer",
-  "references": [Array of json, key as reference url title with value is reference is link], # Array of json
-  "image_urls": [Array of json, key as image url title with value is image is link], # Array of json
+  "answer": "Your markdown answer here you show the answer in markdown format with different styles and whatever format the user requested you should return that response. Dont keep additional spaces or unnecessary text",
+  "references": [Array of json, title, reference_url, description of reference url ] # Array of json
 }}
 The final output must be strictly well-formatted and valid JSON, without any extra commentary, markdown formatting, or code block markers.
 Answer:""",
@@ -59,6 +79,7 @@ Answer:""",
 def load_model_data(
     source_data=None, source_type: str = "faiss", persist_dir: str = "./faiss_index"
 ):
+    retriever = None
     logging.info(f"Loading model data from source type: {source_type}")
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/embedding-001", google_api_key=google_api_key
@@ -74,11 +95,13 @@ def load_model_data(
             logging.info("FAISS vectorstore loaded successfully.")
         except Exception as e:
             logging.error(f"Error loading FAISS vectorstore: {e}")
-            raise
+            # raise
     else:
         if source_type == "json_file":
             if not source_data:
-                logging.error("source_data must be a file path when source_type is 'json_file'")
+                logging.error(
+                    "source_data must be a file path when source_type is 'json_file'"
+                )
                 raise ValueError(
                     "source_data must be a file path when source_type is 'json_file'"
                 )
@@ -86,7 +109,9 @@ def load_model_data(
             context = json.loads(Path(source_data).read_text(encoding="utf-8"))
         elif source_type == "json_object":
             if not isinstance(source_data, dict):
-                logging.error("source_data must be a dictionary when source_type is 'json_object'")
+                logging.error(
+                    "source_data must be a dictionary when source_type is 'json_object'"
+                )
                 raise ValueError(
                     "source_data must be a dictionary when source_type is 'json_object'"
                 )
@@ -151,12 +176,16 @@ def load_model_data(
         model="gemini-2.0-flash", temperature=0.3, google_api_key=google_api_key
     )
 
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        retriever=retriever,
-        return_source_documents=True,
-        chain_type_kwargs={"prompt": prompt_template},
-    )
+    if retriever is not None:
+        logging.error("Retriever is not initialized.")
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=llm,
+            retriever=retriever,
+            return_source_documents=True,
+            chain_type_kwargs={"prompt": prompt_template},
+        )
+    else:
+        qa_chain = None
 
     logging.info("QA chain loaded successfully.")
     return qa_chain
