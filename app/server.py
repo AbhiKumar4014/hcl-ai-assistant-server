@@ -1,4 +1,5 @@
 import os
+
 from flask import Flask, json, request, jsonify
 from flask_cors import CORS
 import logging
@@ -15,8 +16,8 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS
 
 # qa_chain = load_model_data(source_type="json_file", source_data="hcl_sites_data.json")
-qa_chain = None
-qa_chain = load_model_data()
+qa_chain, embeddings = None, None
+embeddings, qa_chain = load_model_data()
 
 @app.route("/health-check", methods=["GET"])
 def healthcheck():
@@ -27,33 +28,30 @@ def healthcheck():
 
 @app.route("/load", methods=["GET"])
 def load():
-    global qa_chain
+    global qa_chain, embeddings
     logging.info("Load requested")
     hcl_urls = load_hcl_sitemap()
     context = extract_all_text_parallel(hcl_urls)
     with open("hcl_sites_data.json", "w") as file:
         json.dump(context, file)
 
-    qa_chain = load_model_data(context, source_type="json_object")
+    embeddings, qa_chain = load_model_data(context, source_type="json_object")
     if qa_chain is not None:
+        print(qa_chain)
         logging.info("Model loaded successfully")
         return jsonify({"message": "Model loaded successfully"})
     else:
         logging.error("Failed to load model")
         return jsonify({"error": "Failed to load model"}), 500
 
-@app.route('/ask', methods=['GET', 'POST'])
+@app.route('/ask', methods=['POST'])
 def ask():
-    global qa_chain
+    global qa_chain, embeddings
 
-    # Get data based on method
-    if request.method == 'GET':
-        query = request.args.get("query")
-        history = request.args.get("history", "")
-    else:  # POST
-        data = request.get_json()
-        query = data.get("query") if data else None
-        history = data.get("history", "") if data else ""
+    # Get data from JSON body
+    data = request.get_json()
+    query = data.get("query") if data else None
+    history = data.get("history", "") if data else ""
 
     # Validate query
     if not query:
@@ -68,10 +66,33 @@ def ask():
         }), 500
 
     # Combine history with the current query if provided
-    full_query = f"Attached Last three converastion{history}\n{query}" if history else query
+    full_query = f"(Attached Last three converastion{history})\n{query}" if history else query
 
     try:
         result = qa_chain.invoke({"query": full_query})
+        source_docs = result["source_documents"]
+        with open("source_docs.txt", "w", encoding="utf-8") as file:
+            for i, doc in enumerate(source_docs):
+                file.write(f"--- Document {i+1} ---\n")
+                file.write(doc.page_content + "\n\n")
+
+        media = extract_relevant_media(
+            query,
+            source_docs,
+            embeddings
+        )
+
+        # print(media)
+
+        images_list = [
+            {"alt": img["alt"], "url": img["url"]} for img in media["images"]
+        ]
+
+        videos_list = [
+            {"alt": video["alt"], "url": video["url"]} for video in media["videos"]
+        ]
+
+        # print(images_list, videos_list)
 
         # Normalize response
         if isinstance(result, dict) and "result" in result:
@@ -93,7 +114,10 @@ def ask():
 
         # Parse the cleaned JSON
         parsed = json.loads(raw_response)
-        # logging.info("Successfully processed query and returning result")
+        parsed["images"] = images_list
+        parsed["videos"] = videos_list
+        # image_path = generate_image_from_text(parsed["answer"])
+        # print(f"Image generated at: {image_path}")
         return jsonify(parsed)
 
     except json.JSONDecodeError as json_err:
@@ -110,7 +134,6 @@ def ask():
             "error": "Oops! Something went wrong while processing your request.",
             "details": str(e)
         }), 500
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=3000, debug=True)

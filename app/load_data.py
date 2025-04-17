@@ -33,20 +33,12 @@ You are designed to be:
 - Professional, maintaining a respectful and courteous tone at all times
 - Helpful, offering accurate, clear, and concise information
 - Focused, responding strictly based on HCL Software's internal resources and solutions
-- Don't include any keys other than the defined JSON format.
+Don't include any keys other than the defined JSON format.
 - Include more details in the answer key.
 
-Key Instructions:
-- Never include any keys other than those defined in the required JSON format.
-- Your response must always be a valid, well-structured JSON object.
-- The `answer` value may use markdown formatting and **must reflect the user’s requested format** (e.g., HTML, bullet points, plain text, table, etc.), if provided in the query, during this dont add any blank spaces or unncessary lines.
-- Even when using markdown or rich formatting, the **entire response must still be returned strictly as a JSON object**.
-- Include as many relevant, helpful details as needed to fully answer the user's question.
-- Use only relevant HCLSoftware URLs for references in the `references` array.
-- Every reference must contain: `title`, `reference_url`, and a short `description`.
-- The response should be strictly parsed json and there can't be any extra spaces or unnecessary lines in the answer key.
-
+- Greet the user politely.
 - If they ask about HCL products, provide detailed and informative responses.
+- Do NOT include URLs inside the "answer" field.
 - If the user greets, respond meaningfully and suggest they explore HCL products.
 - If a scenario is given, understand the intent and suggest suitable HCL products based on the context.
 - Avoid stating that something is "not related to HCL Software" unless it clearly isn't.
@@ -66,10 +58,10 @@ Context:
 Question:
 {question}
 You must respond strictly using the following JSON structure, with no markdown, no extra commentary, and no code block markers:
-You must always return relevant image URLs and references from HCL Software content
+You must always return relevant image, video URLs and references from HCL Software content
 {{
-  "answer": "Your markdown answer here you show the answer in markdown format with different styles and whatever format the user requested you should return that response. Dont keep additional spaces or unnecessary text",
-  "references": [Array of json, title, reference_url, description of reference url ] # Array of json
+  "answer": "Your markdown answer",
+  "references": [Array of json, title, reference_url, description of related reference urls  ] # Array of json,
 }}
 The final output must be strictly well-formatted and valid JSON, without any extra commentary, markdown formatting, or code block markers.
 Answer:""",
@@ -129,16 +121,37 @@ def load_model_data(
             page_image_urls = content_data.get("image_urls", "")
             page_title = content_data.get("title", "")
             page_description = content_data.get("description", "")
+            page_video_urls = content_data.get("video_urls", "")
 
-            # Include the source in the context seen by the model
             image_data = (
                 "\n".join([f"- {alt}: {url}" for alt, url in page_image_urls.items()])
                 if isinstance(page_image_urls, dict)
                 else ""
             )
-            page_content = (
-                f"[Source: {source_url}]\n\n{page_text}\n\nImages:\n{image_data}"
+
+            video_data = (
+                "\n".join(
+                    [
+                        f"- {alt}: {data.get('video_url')}"
+                        + (
+                            f" (thumbnail: {data.get('thumbnail_url')})"
+                            if data.get("thumbnail_url")
+                            else ""
+                        )
+                        for alt, data in page_video_urls.items()
+                    ]
+                )
+                if isinstance(page_video_urls, dict)
+                else ""
             )
+
+            page_content = f"[Source: {source_url}]\n\n{page_text}"
+
+            if image_data:
+                page_content += f"\n\nImages:\n{image_data}"
+
+            if video_data:
+                page_content += f"\n\nVideos:\n{video_data}"
 
             return Document(
                 page_content=page_content,
@@ -148,6 +161,8 @@ def load_model_data(
                     "description": page_description,
                     "section": section,
                     "entry_id": entry_id,
+                    "image_urls": page_image_urls,
+                    "video_urls": page_video_urls,
                 },
             )
 
@@ -188,4 +203,4 @@ def load_model_data(
         qa_chain = None
 
     logging.info("QA chain loaded successfully.")
-    return qa_chain
+    return embeddings, qa_chain
