@@ -9,63 +9,128 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 from bs4 import BeautifulSoup
 import requests
 
+import requests
+from bs4 import BeautifulSoup
+import logging
+from urllib.parse import urljoin
+
+# def extract_text_from_url(url: str) -> dict:
+#     try:
+#         response = requests.get(url, timeout=60)
+#         response.raise_for_status()
+
+#         soup = BeautifulSoup(response.text, "html.parser")
+
+#         # Extract page title
+#         title_tag = soup.find("title")
+#         title = title_tag.text.strip() if title_tag else ""
+
+#         # Extract meta description
+#         meta_desc_tag = soup.find("meta", attrs={"name": "description"})
+#         description = meta_desc_tag.get("content", "").strip() if meta_desc_tag else ""
+
+#         # Remove unnecessary tags
+#         for element in soup(["script", "style", "noscript"]):
+#             element.decompose()
+
+#         # Extract visible text
+#         text = soup.get_text(separator=' ', strip=True)
+
+#         # Extract image URLs with alt text
+#         img_tags = soup.find_all("img")
+#         image_map = {}
+#         unnamed_count = 1
+
+#         for img in img_tags:
+#             src = img.get("src")
+#             if src:
+#                 full_url = requests.compat.urljoin(url, src)
+#                 alt = img.get("alt", "").strip()
+
+#                 if alt:
+#                     image_map[alt] = full_url
+#                 else:
+#                     image_map[f"image_{unnamed_count}"] = full_url
+#                     unnamed_count += 1
+
+#         # Extract <a> tag links with anchor text as key
+#         link_map = {}
+#         for a_tag in soup.find_all("a", href=True):
+#             link_text = a_tag.get_text(strip=True)
+#             link_url = a_tag["href"]
+#             if link_text:
+#                 full_link = requests.compat.urljoin(url, link_url)  # Resolving relative URLs
+#                 link_map[link_text] = full_link
+
+#         return {
+#             "source_page_url": url,
+#             "title": title,
+#             "description": description,
+#             "page_text": text,
+#             "image_urls": image_map,
+#             "links": link_map  # Adding extracted links
+#         }
+
+#     except Exception as e:
+#         logging.error(f"Error extracting text from URL: {url} - {str(e)}")
+#         return {
+#             "error": str(e)
+#         }
+
+
+
 def extract_text_from_url(url: str) -> dict:
-    # logging.info(f"Extracting text from URL: {url}")
     try:
-        response = requests.get(url, timeout=60)
-        response.raise_for_status()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                          "(KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()  # Raise error if status code != 200
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # Extract page title
-        title_tag = soup.find("title")
-        title = title_tag.text.strip() if title_tag else ""
+        # Extract title
+        title = (soup.title.string or "").strip() if soup.title else ""
 
         # Extract meta description
-        meta_desc_tag = soup.find("meta", attrs={"name": "description"})
-        description = meta_desc_tag.get("content", "").strip() if meta_desc_tag else ""
+        meta_desc = soup.find("meta", attrs={"name": "description"})
+        description = meta_desc.get("content", "").strip() if meta_desc else ""
 
-        # Remove unnecessary tags
-        for element in soup(["script", "style", "noscript"]):
-            element.decompose()
+        # Replace anchor tags with "text (url)"
+        for a in soup.find_all("a", href=True):
+            text = a.get_text(strip=True)
+            full_url = urljoin(url, a["href"])
+            a.replace_with(f"{text} ({full_url})" if text else f"{full_url}")
 
-        # Extract visible text
-        text = soup.get_text(separator=' ', strip=True)
-
-        # Extract image URLs with alt text
-        img_tags = soup.find_all("img")
-        image_map = {}
-        unnamed_count = 1
-
-        for img in img_tags:
+        # Replace img tags with Markdown-style ![alt](url)
+        for img in soup.find_all("img"):
             src = img.get("src")
             if src:
-                full_url = requests.compat.urljoin(url, src)
+                full_url = urljoin(url, src)
                 alt = img.get("alt", "").strip()
+                img.replace_with(f"![{alt}]({full_url})" if alt else full_url)
 
-                if alt:
-                    image_map[alt] = full_url
-                else:
-                    image_map[f"image_{unnamed_count}"] = full_url
-                    unnamed_count += 1
+        # Remove non-visible/script tags
+        for tag in soup(["style", "noscript", "script"]):
+            tag.decompose()
 
-        # logging.info(f"Successfully extracted text from URL: {url}")
+        # Extract visible text
+        page_text = soup.get_text(separator=' ', strip=True)
+
         return {
             "source_page_url": url,
             "title": title,
             "description": description,
-            "page_text": text,
-            "image_urls": image_map
+            "page_text": page_text
         }
 
     except Exception as e:
-        logging.error(f"Error extracting text from URL: {url} - {str(e)}")
-        return {
-            "error": str(e)
-        }
+        logging.error(f"Error extracting text from URL: {url} - {e}")
+        return None
 
 
-def extract_all_text_parallel(hcl_urls: dict, max_workers=700):
+def extract_all_text_parallel(hcl_urls: dict, max_workers=5):
     context = {}
     tasks = []
 

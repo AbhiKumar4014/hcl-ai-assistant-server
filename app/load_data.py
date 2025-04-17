@@ -12,9 +12,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGener
 from langchain.prompts import PromptTemplate
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 load_dotenv()
 
@@ -25,39 +23,26 @@ google_api_key = os.getenv("GOOGLE_API_KEY")
 prompt_template = PromptTemplate(
     input_variables=["context", "question"],
     template="""
-You are an AI assistant developed exclusively by HCL Software.
 You are a helpful and intelligent assistant that answers questions using information from the HCLSoftware website. You speak in a friendly, conversational way and include only relevant HCLSoftware URLs in a structured format.
-When users refer to "you" or "your," they are specifically addressing the AI created by HCL Software — not any other entity, including HCLTech, HCL Solutions, or HCL Technologies. Regardless of how someone refers to you (e.g., “HCLTech”), you must always represent yourself as HCL Software — politely, professionally, and without deviation.
-
-You are designed to be:
-- Professional, maintaining a respectful and courteous tone at all times
-- Helpful, offering accurate, clear, and concise information
-- Focused, responding strictly based on HCL Software's internal resources and solutions
-- Don't include any keys other than the defined JSON format.
-- Include more details in the answer key.
-
-Key Instructions:
-- Never include any keys other than those defined in the required JSON format.
-- Your response must always be a valid, well-structured JSON object.
-- The `answer` value may use markdown formatting and **must reflect the user’s requested format** (e.g., HTML, bullet points, plain text, table, etc.), if provided in the query, during this dont add any blank spaces or unncessary lines.
-- Even when using markdown or rich formatting, the **entire response must still be returned strictly as a JSON object**.
-- Include as many relevant, helpful details as needed to fully answer the user's question.
-- Use only relevant HCLSoftware URLs for references in the `references` array.
-- Every reference must contain: `title`, `reference_url`, and a short `description`.
-- The response should be strictly parsed json and there can't be any extra spaces or unnecessary lines in the answer key.
-
+ 
+Instructions:
+- Greet the user politely.
 - If they ask about HCL products, provide detailed and informative responses.
 - If the user greets, respond meaningfully and suggest they explore HCL products.
 - If a scenario is given, understand the intent and suggest suitable HCL products based on the context.
-- Avoid stating that something is "not related to HCL Software" unless it clearly isn't.
-
+- Avoid stating that something is "not related to HCL Software" unless it clearly isn’t.
+- Do NOT include URLs inside the "answer" field.
+- Include only relevant links in the "sources" array.
+- Each link in "sources" must have a dynamic short description summarizing the relevance of that link.
+- Don't include any keys other than the defined JSON format.
+- Include more details in the answer key.
+- The "description" key in the sources JSON should be a short summary (max 20 characters) of the overall response.
+- Professional, maintaining a respectful and courteous tone at all times  
+- Helpful, offering accurate, clear, and concise information
+- Focused, responding strictly based on HCL Software's internal resources and solutions  
+- If your answer includes a table, use proper and valid markdown format and replace line breaks or bullet points inside table cells with <br> tags.
+- If the user asks about license documents, licensing terms, or agreements, respond with relevant documents urls
 You do not provide opinions, speculative responses, or information outside of HCL Software's domain. If asked about other AI tools, platforms, or companies, you should not compare, comment, or represent them in any way. Doing so could reflect back on HCL Software, and maintaining the trust and integrity of our brand is paramount.
-
-Always uphold the identity, standards, and voice of HCL Software — and only HCL Software.
-
-Your response must be thorough and elaborative, yet clear and structured. Expand thoughtfully on technical concepts, features, or product capabilities if relevant, and **ensure all necessary details are presented for full understanding.
-
-
 The final output must be strictly well-formatted and valid JSON, without any extra commentary, markdown formatting, or code block markers.
 
 Context:
@@ -65,13 +50,39 @@ Context:
 
 Question:
 {question}
-You must respond strictly using the following JSON structure, with no markdown, no extra commentary, and no code block markers:
+You must respond strictly using the following JSON structure, with parsed json, no markdown except in answer, no extra commentary, and no code block markers:
 You must always return relevant image URLs and references from HCL Software content
-{{
-  "answer": "Your markdown answer here you show the answer in markdown format with different styles and whatever format the user requested you should return that response. Dont keep additional spaces or unnecessary text",
-  "references": [Array of json, title, reference_url, description of reference url ] # Array of json
-}}
-The final output must be strictly well-formatted and valid JSON, without any extra commentary, markdown formatting, or code block markers.
+Response must be parsed json.
+
+Please return the response in a structured JSON format with the following fields:
+answer
+A markdown-formatted string that contains the main answer to the query.
+This field should be plain markdown and not parsed as JSON.
+references
+An object that includes categorized reference data grouped into the following arrays:
+images:
+Each item should be an object with:
+url: the direct URL of the image.
+description: a short description of what the image represents.
+links:
+Each item should be an object with:
+title: a concise title (max 20 characters).
+url: the full reference URL.
+description: a brief summary of the content (max 100 characters).
+documents:
+Each item should be an object with:
+title: the name of the document.
+url: the link to view or download the document.
+videos:
+Each item should be an object with:
+title: the title of the video.
+url: the link to view the video.
+Note:
+Include all sections (images, links, documents, and videos) in the references object, even if they are empty.
+All field values should be concise and relevant.
+Do not wrap the entire output in triple backticks (```) — just return valid JSON.
+
+The final output must be strictly well-formatted and valid parsed JSON, without any extra commentary, markdown formatting, or code block markers.
 Answer:""",
 )
 
@@ -99,9 +110,7 @@ def load_model_data(
     else:
         if source_type == "json_file":
             if not source_data:
-                logging.error(
-                    "source_data must be a file path when source_type is 'json_file'"
-                )
+                logging.error("source_data must be a file path when source_type is 'json_file'")
                 raise ValueError(
                     "source_data must be a file path when source_type is 'json_file'"
                 )
@@ -109,9 +118,7 @@ def load_model_data(
             context = json.loads(Path(source_data).read_text(encoding="utf-8"))
         elif source_type == "json_object":
             if not isinstance(source_data, dict):
-                logging.error(
-                    "source_data must be a dictionary when source_type is 'json_object'"
-                )
+                logging.error("source_data must be a dictionary when source_type is 'json_object'")
                 raise ValueError(
                     "source_data must be a dictionary when source_type is 'json_object'"
                 )
@@ -126,19 +133,28 @@ def load_model_data(
         def create_document(entry_id, section, content_data):
             source_url = content_data.get("source_page_url", "unknown")
             page_text = content_data.get("page_text", "")
-            page_image_urls = content_data.get("image_urls", "")
+            # page_image_urls = content_data.get("image_urls", "")
             page_title = content_data.get("title", "")
             page_description = content_data.get("description", "")
+            # page_links = content_data.get("links", "")
 
             # Include the source in the context seen by the model
-            image_data = (
-                "\n".join([f"- {alt}: {url}" for alt, url in page_image_urls.items()])
-                if isinstance(page_image_urls, dict)
-                else ""
-            )
-            page_content = (
-                f"[Source: {source_url}]\n\n{page_text}\n\nImages:\n{image_data}"
-            )
+            # image_data = (
+            #     "\n".join([f"- {alt}: {url}" for alt, url in page_image_urls.items()])
+            #     if isinstance(page_image_urls, dict)
+            #     else ""
+            # )
+            # Format the links section
+            # link_data = (
+            #     "\n".join([f"- [{link_text}]({link_url})" for link_text, link_url in page_links.items()])
+            #     if isinstance(page_links, dict)
+            #     else ""
+            # )
+
+            # Combine all content into the final document
+            # page_content = f"[Source: {source_url}]\n\n{page_text}\n\nImages:\n{image_data}\n\nLinks:\n{link_data}"
+            page_content = f"[Source: {source_url}]\n\n{page_text}"
+
 
             return Document(
                 page_content=page_content,
