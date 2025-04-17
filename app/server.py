@@ -15,8 +15,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 app = Flask(__name__)
 CORS(app)  # Enable CORS
 
-# qa_chain = load_model_data(source_type="json_file", source_data="hcl_sites_data.json") 
 qa_chain = None
+# qa_chain = load_model_data(source_type="json_file", source_data="hcl_sites_data.json")
 qa_chain = load_model_data()
 
 @app.route("/health-check", methods=["GET"])
@@ -30,11 +30,23 @@ def healthcheck():
 def load():
     global qa_chain
     logging.info("Load requested")
+    # Extract the urls from the sitemap
     hcl_urls = load_hcl_sitemap()
+
+    # Scrap the web page contents parallely
     context = extract_all_text_parallel(hcl_urls)
+
+    # Extract the document URLs from the JSON file
+    doc_urls = extract_all_doc_urls()
+    for endpoint, urls in doc_urls.items():
+        if endpoint in context:
+            context[endpoint][endpoint] = urls
+
+    # Backup the context to a JSON file
     with open("hcl_sites_data.json", "w") as file:
         json.dump(context, file)
 
+    # Load the model data
     qa_chain = load_model_data(context, source_type="json_object")
     if qa_chain is not None:
         print(qa_chain)
@@ -70,7 +82,7 @@ def ask():
 
     try:
         result = qa_chain.invoke({"query": full_query})
-        logging.info(f"test type {type(result["result"])}")
+        # logging.info(f"test type {type(result["result"])}")
 
         # Normalize response
         if isinstance(result, dict) and "result" in result:
@@ -90,34 +102,24 @@ def ask():
         if raw_response.endswith("```"):
             raw_response = raw_response[: -len("```")].rstrip()
 
-        # return jsonify(raw_response), 200
         # Parse the cleaned JSON
         parsed = json.loads(raw_response)
         # logging.info("Successfully processed query and returning result")
         return jsonify(parsed)
 
     except json.JSONDecodeError as json_err:
-            logging.warning(f"Primary JSON decode failed: {json_err}")
-            logging.warning("Attempting fallback extraction.")
+            logging.warning(f"Primary JSON decode failed: {json_err}. \n Attempting fallback extraction")
 
             answer = ""
             references = []
 
             try:
-                # Replace any sequence of 6 or more spaces with a single space
-                raw_response = re.sub(r'\s{6,}', ' ', raw_response)
-
                 # Extract the "answer" field using regex
                 answer_match = re.search(r'"answer"\s*:\s*"(.*?)"(,|\n|\r)', raw_response, re.DOTALL)
                 answer = answer_match
                 if answer_match:
                     answer = answer_match.group(1).encode().decode('unicode_escape')
 
-                # Extract references block manually
-                match = re.search(r'"references"\s*:\s*"(?P<refs>.*?)"', raw_response, re.DOTALL)
-                if match:
-                    references_str = match.group("refs")
-                    print("Stringified references:", references_str)
                 references_match = re.search(r'"references"\s*:\s*({.*?})\s*(,|\n|$)', raw_response, re.DOTALL)
                 logging.info(references_match)
                 if references_match:
@@ -143,11 +145,6 @@ def ask():
                     "raw": raw_response
                 }), 206
 
-        # return jsonify({
-        #     "error": "Invalid JSON in model response.",
-        #     "details": str(json_err),
-        #     "raw": raw_response
-        # }), 500
 
     except Exception as e:
         logging.exception("Unexpected error during ask")
@@ -155,7 +152,6 @@ def ask():
             "error": "Oops! Something went wrong while processing your request.",
             "details": str(e)
         }), 500
-
 
 if __name__ == "__main__":
     logging.info("Server is running on port: 3000")
