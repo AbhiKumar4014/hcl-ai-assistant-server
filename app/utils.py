@@ -13,6 +13,8 @@ import requests
 from bs4 import BeautifulSoup
 import logging
 from urllib.parse import urljoin
+import json
+
 
 # def extract_text_from_url(url: str) -> dict:
 #     try:
@@ -147,3 +149,38 @@ def extract_all_text_parallel(hcl_urls: dict, max_workers=5):
                 context[site_name] = result
 
     return context
+
+def fetch_attachment_links(api_url: str, base_url: str) -> list[dict]:
+    try:
+        response = requests.get(api_url)
+        response.raise_for_status()
+        data = response.json()
+        if "itemlist" not in data or not isinstance(data["itemlist"], list):
+            raise ValueError("Invalid response format")
+
+        result = [
+            {
+                "title": item.get("title", ""),
+                "url": f"{base_url}{item.get('attachment', '')}"
+            }
+            for item in data["itemlist"]
+        ]
+
+        return result
+
+    except Exception as e:
+        logging.error("Error: in except", e)
+        return []
+
+def extract_all_doc_urls() -> dict:
+    BASE_URL = "http://www.hcl-software.com"
+    response = {}
+    with open('document_urls.json', 'r') as file:
+        documents_urls = json.load(file)
+    if documents_urls:
+        for endpoint, url in documents_urls.items():
+            logging.info("Extracting")
+            data = fetch_attachment_links(url, BASE_URL)
+            if data:
+                response[endpoint] = data
+    return response
