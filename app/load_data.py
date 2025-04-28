@@ -53,6 +53,7 @@ prompt_template = PromptTemplate(
     - Ensure that the tone remains professional, detailed, insightful, and customer-focused while being friendly.
     - Expand your response to cover use cases, best practices, and specific HCLSoftware solutions when appropriate.
     - Avoid oversimplified or surface-level responses; aim for depth and breadth of information.
+    - If history is provided, you should remember it, but always prioritize answering based on the current query. Only refer to the history if the user explicitly asks about it.
 
     You are an HCLSoftware specialist assistant that STRICTLY uses provided context. Follow these rules:
 
@@ -98,9 +99,6 @@ prompt_template = PromptTemplate(
     Question: {question}
     You must respond strictly using the following JSON structure, with no markdown, no extra commentary, and no code block markers: You must always return relevant image URLs and references from HCL Software content
     Provide the response strictly using the exact JSON structure below, with no additional commentary:
-    Context: {context}
-    Question: {question}
-    You must respond strictly using the following JSON structure, with no markdown, no extra commentary, and no code block markers: You must always return relevant image URLs and references from HCL Software content
     {{
   "answer": "Your well-explained markdown style text with brief description and explained as above",
   "references":
@@ -111,11 +109,12 @@ prompt_template = PromptTemplate(
       "description": "Brief description (max 100 chars)"
     }}
   ],
-  "videos": [
+   "videos": [
         {{
-      "title": "Short video title (max 20 chars)",
-      "reference_url": "Exact YouTube URL from context(definitely HCL related and must be video)",
-      "description": "Brief summary of video (max 100 chars)"
+      "title": "Short video title (max 20 characters)",
+    "reference_url": "Exact YouTube URL (must be a direct YouTube video link, no channel links, strictly related to HCL, no image links or non-YouTube URLs)",
+    "thumbnail_url": "Extract Thumbnail URL of the above fetched Youtube video",
+    "description": "Brief summary of the video content (max 100 characters)"
     }}
   ],
   "documents": [
@@ -127,7 +126,7 @@ prompt_template = PromptTemplate(
   ]
   }}
 }}
-    Answer:"""
+    Answer:""",
 )
 
 def chunk_documents(documents, batch_size):
@@ -156,7 +155,7 @@ def embed_documents_in_batches(documents, embeddings, persist_dir, batch_size=50
     return all_vectors
 
 def load_model_data(source_data=None, source_type: str = "faiss", persist_dir: str = "./faiss_index"):
-    retriever = None
+    retriever, vectorstore = None, None
     logging.info(f"Loading model data from source type: {source_type}")
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/embedding-001", google_api_key=google_api_key

@@ -134,10 +134,15 @@ def ask():
 
         # Parse the cleaned JSON
         parsed = json.loads(raw_response)
-        if "videos" in parsed:
-            parsed["videos"] = [
-                video for video in parsed["videos"] if is_youtube_video_valid(video["url"])
-            ]
+        if "references" in parsed:
+            if "videos" in parsed["references"]:
+                valid_videos = [
+                    video for video in parsed["references"]["videos"]
+                    if is_youtube_video_valid(video.get("reference_url", ""))
+                ]
+                parsed["references"]["videos"] = valid_videos[:3]   
+            if "documents" in parsed["references"]:
+                parsed["references"]["documents"] = parsed["references"]["documents"][:3]
 
         return jsonify(parsed)
 
