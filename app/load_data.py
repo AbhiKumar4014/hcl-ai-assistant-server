@@ -101,9 +101,8 @@ prompt_template = PromptTemplate(
     Provide the response strictly using the exact JSON structure below, with no additional commentary:
     {{
   "answer": "Your well-explained markdown style text with brief description and explained as above",
-  "references":
-        {{
-            "links": [{{
+    "references": [
+    {{
       "title": "Short title (max 20 chars)",
       "reference_url": "Exact URL from context",
       "description": "Brief description (max 100 chars)"
@@ -113,7 +112,6 @@ prompt_template = PromptTemplate(
         {{
       "title": "Short video title (max 20 characters)",
     "reference_url": "Exact YouTube URL (must be a direct YouTube video link, no channel links, strictly related to HCL, no image links or non-YouTube URLs)",
-    "thumbnail_url": "Extract Thumbnail URL of the above fetched Youtube video",
     "description": "Brief summary of the video content (max 100 characters)"
     }}
   ],
@@ -125,7 +123,6 @@ prompt_template = PromptTemplate(
     }}
   ]
   }}
-}}
     Answer:""",
 )
 

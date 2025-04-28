@@ -112,12 +112,18 @@ def extract_all_doc_urls() -> dict:
                 response[endpoint] = data
     return response
 
-def is_youtube_video_valid(url: str) -> bool:    
+
+def is_youtube_video_valid(url: str) -> tuple[bool, str]:
     oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
-    # print("Oembed URL:", oembed_url)  # Debugging line
+    print(f"Checking YouTube video: {oembed_url}")
     try:
         response = requests.get(oembed_url, timeout=5)
-        return response.status_code == 200
+        if response.status_code == 200:
+            data = response.json()
+            thumbnail_url = data.get("thumbnail_url", "")
+            return True, thumbnail_url
+        else:
+            return False, ""
     except requests.RequestException as e:
-        logging.error(f"Error checking video: {e}")
-        return False
+        logging.error(f"Error checking YouTube video '{url}': {e}")
+        return False, ""

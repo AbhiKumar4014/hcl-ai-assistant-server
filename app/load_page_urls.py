@@ -5,7 +5,6 @@ import logging
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
 def load_hcl_sitemap(sitemap_urls):
     # sitemap_urls = [
     #     "https://www.hcl-software.com/sitemap_en.xml",
