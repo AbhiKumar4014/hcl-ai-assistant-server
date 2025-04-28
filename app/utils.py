@@ -115,7 +115,7 @@ def extract_all_doc_urls() -> dict:
 
 def is_youtube_video_valid(url: str) -> tuple[bool, str]:
     oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
-    print(f"Checking YouTube video: {oembed_url}")
+    # print(f"Checking YouTube video: {oembed_url}")
     try:
         response = requests.get(oembed_url, timeout=5)
         if response.status_code == 200:
