@@ -26,11 +26,24 @@ def healthcheck():
         return jsonify({"message": "Server is healthy and model loaded successfully"})
     return jsonify({"message": "Server is healthy!"})
 
-@app.route("/load", methods=["GET"])
+@app.route("/load", methods=["POST"])
 def load():
     global qa_chain
+    data = request.get_json()
+    if not data or "sitemap_urls" not in data:
+        logging.warning("Missing 'sitemap_url' in request body")
+        return jsonify({"error": "Missing 'sitemap_url' in request body"}), 400
+
+    sitemap_data = data["sitemap_urls"]
+    if isinstance(sitemap_data, str):
+        sitemap_urls = [sitemap_data]
+    elif isinstance(sitemap_data, list) and all(isinstance(url, str) for url in sitemap_data):
+        sitemap_urls = sitemap_data
+    else:
+        return jsonify({"error": "'sitemap_url' must be a string or list of strings"}), 400
+
     logging.info("Load requested")
-    hcl_urls = load_hcl_sitemap()
+    hcl_urls = load_hcl_sitemap(sitemap_urls)
     context = extract_all_text_parallel(hcl_urls)
     doc_urls = extract_all_doc_urls()
 
@@ -72,20 +85,6 @@ def load():
     else:
         logging.error("Failed to load model")
         return jsonify({"error": "Failed to load model"}), 500
-
-
-
-    # with open("hcl_sites_data.json", "w") as file:
-    #     json.dump(context, file)
-
-    # qa_chain = load_model_data(context, source_type="json_object")
-    # if qa_chain is not None:
-    #     print(qa_chain)
-    #     logging.info("Model loaded successfully")
-    #     return jsonify({"message": "Model loaded successfully"})
-    # else:
-    #     logging.error("Failed to load model")
-    #     return jsonify({"error": "Failed to load model"}), 500
 
 @app.route('/ask', methods=['POST'])
 def ask():
