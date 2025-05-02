@@ -3,7 +3,7 @@ from flask import Flask, json, request, jsonify
 from flask_cors import CORS
 import logging
 
-from app.load_page_urls import *
+from load_page_urls import *
 from load_data import *
 from utils import *
 import re
