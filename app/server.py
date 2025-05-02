@@ -3,7 +3,7 @@ from flask import Flask, json, request, jsonify
 from flask_cors import CORS
 import logging
 
-from load_page_urls import *
+from app.load_page_urls import *
 from load_data import *
 from utils import *
 import re
@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 app = Flask(__name__)
 CORS(app)  # Enable CORS
 
-# qa_chain = load_model_data(source_type="json_file", source_data="hcl_sites_data.json") 
+# qa_chain = load_model_data(source_type="json_file", source_data="hcl_sites_data.json")
 qa_chain = None
 qa_chain = load_model_data()
 
@@ -107,39 +107,39 @@ def ask():
             "error": "Oops! Something went wrong while processing your request.",
             "details": str(e)
         }), 500
-        
+
 @app.route('/query/call-chatbot-api', methods=['POST'])
 def call_chatbot_api():
     data = request.get_json()
     additional_parameter = data.get("additional_parameter")
- 
+
     if not additional_parameter:
         return jsonify({"error": "Missing 'additional_parameter' in request body"}), 400
-   
+
     USERNAME = "user@hcl-software.com"
     DISPLAYNAME = "user@hcl-software.com"
     ACCESS_TOKEN = "xxxxxxxxxxxxxsssss"
- 
+
     API_USERNAME = "80d590a9-dd10-48b5-8437-0ed66ffefeea"
     API_PASSWORD = "d64889b2-ad10-46ea-9230-5ede72da76ca"
- 
+
     credentials = f"{API_USERNAME}:{API_PASSWORD}"
     token = base64.b64encode(credentials.encode()).decode()
- 
- 
- 
+
+
+
     payload = {
     "username": USERNAME,
     "displayname": DISPLAYNAME,
     "access_token": ACCESS_TOKEN,
     "additional_parameter": additional_parameter
     }
- 
+
     headers = {
         "Authorization": f"Basic {token}",
         "Content-Type": "application/json"
     }
- 
+
     try:
         response = requests.post("https://hclswaichatbot.eu.bigfixaex.ai/external/api/token", headers=headers, json=payload)
         return jsonify({
