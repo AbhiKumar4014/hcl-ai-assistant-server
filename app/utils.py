@@ -2,12 +2,11 @@ import concurrent.futures
 import requests
 from bs4 import BeautifulSoup
 import logging
+from urllib.parse import urljoin
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-from bs4 import BeautifulSoup
-import requests
 
 def extract_text_from_url(url: str) -> dict:
     try:
@@ -60,7 +59,7 @@ def extract_text_from_url(url: str) -> dict:
         return None
 
 
-def extract_all_text_parallel(hcl_urls: dict, max_workers=700):
+def extract_all_text_parallel(hcl_urls: dict, max_workers=10):
     context = {}
     tasks = []
 
