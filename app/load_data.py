@@ -21,10 +21,10 @@ google_api_key = os.getenv("GOOGLE_API_KEY")
 # Define prompt template
 prompt_template = PromptTemplate(
     input_variables=["context", "question"],
-    template=""" You are a helpful and intelligent assistant that answers questions using information from the HCLSoftware website. 
-    You speak in a friendly, conversational way and include only relevant HCLSoftware URLs in a structured format. 
+    template=""" You are a helpful and intelligent assistant that answers questions using information from the HCLSoftware website.
+    You speak in a friendly, conversational way and include only relevant HCLSoftware URLs in a structured format.
 
-    Instructions: 
+    Instructions:
     - Prioritize official HCLSoftware product, solution, and service pages.
     - At least **60% of the reference URLs** MUST come from **main pages or subpages** that do **NOT** include `/blog` in the URL.
     - At most **40% of the reference URLs** may be from blog pages, and only when official main or sub-product pages are unavailable for the given context.
@@ -50,14 +50,14 @@ prompt_template = PromptTemplate(
     - Give maximum of 6 items in the references section or field.
     The final output must be strictly well-formatted and valid JSON, without any extra commentary, or code block markers.
 
-    Context: {context} 
-    Question: {question} 
+    Context: {context}
+    Question: {question}
 
     You must respond strictly using the following JSON structure, with no markdown, no extra commentary, and no code block markers:
     You must always return relevant image URLs and references from HCL Software content
 
-    {{ 
-        "answer": "Your markdown answer", 
+    {{
+        "answer": "Your markdown answer",
         "references": [
             {{
                 "title": "Title (max 20 characters)",
@@ -126,6 +126,10 @@ def load_model_data(source_data=None, source_type: str = "faiss", persist_dir: s
             raise ValueError("Invalid source_type. Must be 'faiss', 'json_file', or 'json_object'.")
 
         def create_document(entry_id, section, content_data):
+            if content_data is None:
+                logging.warning(f"Skipping entry {entry_id} with unknown source URL")
+                return None
+
             source_url = content_data.get("source_page_url", "unknown")
             page_text = content_data.get("page_text", "")
             page_title = content_data.get("title", "")
@@ -179,4 +183,4 @@ def load_model_data(source_data=None, source_type: str = "faiss", persist_dir: s
 
     logging.info("QA chain loaded successfully.")
     return qa_chain
- 
+
