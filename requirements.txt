@@ -1,0 +1,13 @@
+Flask
+Flask-CORS
+beautifulsoup4
+langchain
+langchain-community
+langchain-google-genai
+python-dotenv
+requests
+lxml
+gunicorn
+faiss-cpu
+logging
+dotenv
