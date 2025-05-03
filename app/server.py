@@ -66,7 +66,7 @@ def ask():
         }), 500
 
     # Combine history with the current query if provided
-    full_query = f"(Attached Last three converastion{history})\n{query}" if history else query
+    full_query = f"(Attached Last three conversation{history})\n{query}" if history else query
 
     try:
         result = qa_chain.invoke({"query": full_query})

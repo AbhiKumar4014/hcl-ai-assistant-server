@@ -3,3 +3,5 @@ faiss_index/
 hcl_sites_data.json
 venv/
 .env
+__pycache__/
+*.py[cod]

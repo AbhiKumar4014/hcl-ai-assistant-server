@@ -26,17 +26,15 @@ prompt_template = PromptTemplate(
 
     Instructions:
     - Prioritize official HCLSoftware product, solution, and service pages.
-    - At least **60% of the reference URLs** MUST come from **main pages or subpages** that do **NOT** include `/blog` in the URL.
-    - At most **40% of the reference URLs** may be from blog pages, and only when official main or sub-product pages are unavailable for the given context.
     - If they ask about HCL products, provide detailed and informative responses.
     - If the user greets, respond meaningfully and suggest they explore HCL products.
     - If a scenario is given, understand the intent and suggest suitable HCL products based on the context.
+    - If the query includes blog then refer to the blog context.
     - Avoid stating that something is "not related to HCLSoftware" unless it clearly isn’t.
     - Do NOT include URLs inside the "answer" field.
     - Do NOT include any HTML tags or structure in your response under any condition.
     - Do NOT respond with or include HTML code, even if asked explicitly.
     - Include only relevant links in the "reference_url" array.
-    - The "references" array must follow this ratio: 80% from main/non-blog pages, max 20% from blog pages.
     - Main product, sub-product, and descriptive solution pages are top priority. Blog links should be used only when no better official product or solution page exists.
     - Each link must be unique and directly relevant to the context.
     - Do not include any keys other than the defined JSON format.
@@ -47,7 +45,10 @@ prompt_template = PromptTemplate(
     - Be professional, courteous, and informative at all times.
     - Avoid opinions, speculation, or comparisons with any third-party vendors, tools, or platforms.
     - Don't mention any links or url's in the answer field.
-    - Give maximum of 6 items in the references section or field.
+    - Give maximum of 4 items in the references section or field.
+
+    - The answer key in response should be descriptive and should contain minimum 500 words.
+    - The assistant should retain conversation history for context but not let it influence responses unless the user explicitly refers to it in their query. History should be considered only when directly mentioned or requested by the user.
     The final output must be strictly well-formatted and valid JSON, without any extra commentary, or code block markers.
 
     Context: {context}
@@ -61,7 +62,7 @@ prompt_template = PromptTemplate(
         "references": [
             {{
                 "title": "Title (max 20 characters)",
-                "reference_url": "", # max 6 references
+                "reference_url": "", # max 4 references
                 "description": "Short summary (max 80 characters)"
             }}
             // Additional valid reference entries following the 80-20 ratio
@@ -75,7 +76,7 @@ def chunk_documents(documents, batch_size):
     for i in range(0, len(documents), batch_size):
         yield documents[i:i + batch_size]
 
-def embed_documents_in_batches(documents, embeddings, persist_dir, batch_size=10, delay=45):
+def embed_documents_in_batches(documents, embeddings, persist_dir, batch_size=100, delay=45):
     logging.info("Embedding documents in batches to respect rate limits.")
     all_vectors = None
 
@@ -107,7 +108,15 @@ def load_model_data(source_data=None, source_type: str = "faiss", persist_dir: s
         logging.info(f"Loading FAISS vectorstore from: {persist_dir}")
         try:
             vectorstore = FAISS.load_local(persist_dir, embeddings, allow_dangerous_deserialization=True)
-            retriever = vectorstore.as_retriever()
+            retriever = vectorstore.as_retriever(
+            search_type="similarity",
+            search_kwargs={
+                "k": 5,
+                "fetch_k": 20,
+                "lambda_mult": 0.5,
+                "score_threshold": 0.7,
+            },
+        )
             logging.info("FAISS vectorstore loaded successfully.")
         except Exception as e:
             logging.error(f"Error loading FAISS vectorstore: {e}")
@@ -131,9 +140,9 @@ def load_model_data(source_data=None, source_type: str = "faiss", persist_dir: s
                 return None
 
             source_url = content_data.get("source_page_url", "unknown")
-            page_text = content_data.get("page_text", "")
-            page_title = content_data.get("title", "")
-            page_description = content_data.get("description", "")
+            page_text = content_data.get("page_text", "unknown")
+            page_title = content_data.get("title", "unknown")
+            page_description = content_data.get("description", "unknown")
             page_content = f"[Source: {source_url}]\n\n{page_text}"
             return Document(
                 page_content=page_content,
@@ -159,7 +168,7 @@ def load_model_data(source_data=None, source_type: str = "faiss", persist_dir: s
         retriever = vectorstore.as_retriever(
             search_type="similarity",
             search_kwargs={
-                "k": 5,
+                "k": 10,
                 "fetch_k": 20,
                 "lambda_mult": 0.5,
                 "score_threshold": 0.7,
