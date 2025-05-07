@@ -166,12 +166,60 @@ def ask():
         return jsonify(parsed)
 
     except json.JSONDecodeError as json_err:
-        logging.error(f"JSON parsing error: {json_err}, raw response: {raw_response}")
-        return jsonify({
-            "error": "Invalid JSON in model response.",
-            "details": str(json_err),
-            "raw": raw_response
-        }), 500
+        logging.warning(f"Primary JSON decode failed: {json_err}. \n Attempting fallback extraction")
+    
+        answer = ""
+        references = []
+        videos = []
+        documents = []
+    
+        try:
+            # Extract the "answer" field using regex
+            answer_match = re.search(r'"answer"\s*:\s*"(.*?)"(,|\n|\r)', raw_response, re.DOTALL)
+            if answer_match:
+                answer = json.loads(f'"{answer_match.group(1)}"')  # Safe unescaping
+    
+            # Extract "references" array
+            references_match = re.search(r'"references"\s*:\s*(\[[\s\S]*?\])', raw_response)
+            if references_match:
+                try:
+                    references = json.loads(references_match.group(1))
+                except json.JSONDecodeError:
+                    logging.warning("Could not parse `references` field")
+    
+            # Extract "videos" array
+            videos_match = re.search(r'"videos"\s*:\s*(\[[\s\S]*?\])', raw_response)
+            if videos_match:
+                try:
+                    videos = json.loads(videos_match.group(1))
+                except json.JSONDecodeError:
+                    logging.warning("Could not parse `videos` field")
+    
+            # Extract "documents" array
+            documents_match = re.search(r'"documents"\s*:\s*(\[[\s\S]*?\])', raw_response)
+            if documents_match:
+                try:
+                    documents = json.loads(documents_match.group(1))
+                except json.JSONDecodeError:
+                    logging.warning("Could not parse `documents` field")
+    
+            return jsonify({
+                "error": "Partial JSON parsing fallback triggered.",
+                "details": str(json_err),
+                "answer": answer,
+                "references": references,
+                "videos": videos,
+                "documents": documents,
+                "raw": raw_response
+            }), 200
+    
+        except Exception as extract_err:
+            logging.error(f"Manual fallback also failed: {extract_err}")
+            return jsonify({
+                "error": "JSON parsing failed and fallback also failed.",
+                "details": str(json_err),
+                "raw": raw_response
+            }), 206
 
     except Exception as e:
         logging.exception("Unexpected error during ask")
