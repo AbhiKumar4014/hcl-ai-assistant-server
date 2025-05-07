@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import logging
 from urllib.parse import urljoin
 import json
+import random
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -117,7 +118,6 @@ def extract_all_doc_urls() -> dict:
 
 def is_youtube_video_valid(url: str) -> tuple[bool, str]:
     oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
-    # print(f"Checking YouTube video: {oembed_url}")
     try:
         response = requests.get(oembed_url, timeout=5)
         if response.status_code == 200:
@@ -125,10 +125,75 @@ def is_youtube_video_valid(url: str) -> tuple[bool, str]:
             thumbnail_url = data.get("thumbnail_url", "")
             return True, thumbnail_url
         else:
+            logging.warning("Invalid YouTube video URL: %s", url)
             return False, ""
     except requests.RequestException as e:
         logging.error(f"Error checking YouTube video '{url}': {e}")
         return False, ""
 
-import random
+
+
+def get_images(urls: list[str], count: int = 6) -> list[str]:
+    collected_images = []
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    for url in urls:
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            overview_div = soup.find("div", id="overview")
+            if not overview_div:
+                logging.warning(f"No <div id='overview'> found for {url}")
+                continue
+
+            found = False
+            image_count = 0
+
+            for tag in soup.find_all(True):
+                if tag == overview_div:
+                    found = True
+
+                if found and tag.name == "img" and tag.get("src"):
+                    img_url = urljoin(url, tag["src"])
+
+                    # Check image size before accepting
+                    try:
+                        img_resp = requests.get(img_url, timeout=5)
+                        img = Image.open(BytesIO(img_resp.content))
+                        width, height = img.size
+                        aspect_ratio = width / height
+                        if width > 195 and height > 97:
+                            if aspect_ratio == 1.5:
+                                collected_images.append(img_url)
+                                image_count += 1
+                                if image_count == count:
+                                    break
+
+                    except Exception as img_error:
+                        logging.warning(f"Skipping image {img_url}: {img_error}")
+                        continue
+        except Exception as e:
+            # logging.error(f"Error processing URL {url}: {e}")
+            continue
+
+    # If fewer than `count` images are collected, fetch additional images from images.json
+    if len(collected_images) < count:
+        try:
+            with open('images.json', 'r') as file:
+                images_data = json.load(file)
+                all_images = images_data
+
+                # Calculate how many more images are needed
+                remaining_count = count - len(collected_images)
+
+                # Select random images to fill the gap
+                additional_images = random.sample(all_images, min(remaining_count, len(all_images)))
+                collected_images.extend(additional_images)
+        except Exception as json_error:
+            logging.error(f"Error reading images.json: {json_error}")
+
+    # Ensure only `count` images are returned
+    return collected_images[:count]
 

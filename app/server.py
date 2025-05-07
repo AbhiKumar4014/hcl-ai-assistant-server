@@ -116,8 +116,6 @@ def ask():
             raise ValueError("Invalid JSON format: " + str(e))
 
     try:
-        # inputs = clean_json_input(full_query)
-        print(full_query)
         result = qa_chain.invoke(full_query)
         source_docs = result.get("source_documents", [])
 
@@ -146,23 +144,23 @@ def ask():
         # Parse the cleaned JSON
         parsed = json.loads(raw_response)
         if "videos" in parsed:
+            # logging.info(f"""{parsed["videos"]} found in parsed response""")
             valid_videos = []
             for video in parsed["videos"]:
-                print(video)
-                url = video.get("reference_url", "")
+                url = video.get("video_url", "")
                 is_valid, thumbnail_url = is_youtube_video_valid(url)
                 if is_valid:
                     video["thumbnail_url"] = thumbnail_url
                     valid_videos.append(video)
-            parsed["videos"] = valid_videos[:3]   
+            parsed["videos"] = valid_videos  
 
         if "documents" in parsed:
             parsed["documents"] = parsed["documents"][:3]
 
-        # source_page_urls = [doc.metadata.get("source_page_url", "") for doc in source_docs]
-        # if source_page_urls:
-        #     images = get_images(source_page_urls, 6)
-        #     parsed["images"] = images
+        source_page_urls = [doc.metadata.get("source_page_url", "") for doc in source_docs]
+        if source_page_urls:
+            images = get_images(source_page_urls, 6)
+            parsed["images"] = images
 
 
         return jsonify(parsed)
