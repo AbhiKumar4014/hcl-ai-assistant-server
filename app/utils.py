@@ -59,7 +59,7 @@ def extract_text_from_url(url: str) -> dict:
         return None
 
 
-def extract_all_text_parallel(hcl_urls: dict, max_workers=50):
+def extract_all_text_parallel(hcl_urls: dict, max_workers=10):
     context = {}
     tasks = []
 
@@ -76,6 +76,8 @@ def extract_all_text_parallel(hcl_urls: dict, max_workers=50):
                 context[site_name] = result
 
     return context
+
+
 
 def fetch_attachment_links(api_url: str, base_url: str) -> list[dict]:
     try:
@@ -127,3 +129,6 @@ def is_youtube_video_valid(url: str) -> tuple[bool, str]:
     except requests.RequestException as e:
         logging.error(f"Error checking YouTube video '{url}': {e}")
         return False, ""
+
+import random
+

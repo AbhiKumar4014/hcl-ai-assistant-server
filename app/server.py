@@ -6,8 +6,8 @@ import logging
 from load_page_urls import *
 from load_data import *
 from utils import *
-import json
 import re
+import base64
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -15,18 +15,18 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 app = Flask(__name__)
 CORS(app)  # Enable CORS
 
-qa_chain = None
+# qa_chain = None
 # qa_chain = load_model_data(source_type="json_file", source_data="hcl_sites_data.json")
 qa_chain = load_model_data()
 
-@app.route("/health-check", methods=["GET"])
+@app.route("/query/health-check", methods=["GET"])
 def healthcheck():
     logging.info("Health check requested")
     if qa_chain is not None:
         return jsonify({"message": "Server is healthy and model loaded successfully"})
     return jsonify({"message": "Server is healthy!"})
 
-@app.route("/load", methods=["POST"])
+@app.route("/query/load", methods=["POST"])
 def load():
     global qa_chain
     data = request.get_json()
@@ -72,21 +72,19 @@ def load():
                 }
             )
 
-    # Backup the context to a JSON file
     with open("hcl_sites_data.json", "w") as file:
         json.dump(context, file)
 
-    # Load the model data
     qa_chain = load_model_data(context, source_type="json_object")
     if qa_chain is not None:
-        # print(qa_chain)
+        print(qa_chain)
         logging.info("Model loaded successfully")
         return jsonify({"message": "Model loaded successfully"})
     else:
         logging.error("Failed to load model")
         return jsonify({"error": "Failed to load model"}), 500
 
-@app.route('/ask', methods=['POST'])
+@app.route('/query/ask', methods=['POST'])
 def ask():
     global qa_chain
 
@@ -108,10 +106,24 @@ def ask():
         }), 500
 
     # Combine history with the current query if provided
-    full_query = f"(Attached Last three converastion{history})\n{query}" if history else query
+    full_query = f"(Attached Last three conversation{history})\n{query}" if history else query
+    
+    def clean_json_input(text):
+        try:
+            cleaned = text.replace('\u2003', ' ').replace('\n', '')
+            return json.loads(cleaned)
+        except json.JSONDecodeError as e:
+            raise ValueError("Invalid JSON format: " + str(e))
 
     try:
-        result = qa_chain.invoke({"query": full_query})
+        # inputs = clean_json_input(full_query)
+        print(full_query)
+        result = qa_chain.invoke(full_query)
+        source_docs = result.get("source_documents", [])
+
+        with open("source_documents.json", "w") as file:
+            logging.info("Saving source documents to source_documents.json")
+            json.dump([str(doc) for doc in source_docs], file, indent=4)
 
         # Normalize response
         if isinstance(result, dict) and "result" in result:
@@ -133,10 +145,10 @@ def ask():
 
         # Parse the cleaned JSON
         parsed = json.loads(raw_response)
-        
         if "videos" in parsed:
             valid_videos = []
             for video in parsed["videos"]:
+                print(video)
                 url = video.get("reference_url", "")
                 is_valid, thumbnail_url = is_youtube_video_valid(url)
                 if is_valid:
@@ -144,8 +156,14 @@ def ask():
                     valid_videos.append(video)
             parsed["videos"] = valid_videos[:3]   
 
-        if "references" in parsed:
+        if "documents" in parsed:
             parsed["documents"] = parsed["documents"][:3]
+
+        # source_page_urls = [doc.metadata.get("source_page_url", "") for doc in source_docs]
+        # if source_page_urls:
+        #     images = get_images(source_page_urls, 6)
+        #     parsed["images"] = images
+
 
         return jsonify(parsed)
 
@@ -164,6 +182,47 @@ def ask():
             "details": str(e)
         }), 500
 
+@app.route('/query/call-chatbot-api', methods=['POST'])
+def call_chatbot_api():
+    data = request.get_json()
+    additional_parameter = data.get("additional_parameter")
+
+    if not additional_parameter:
+        return jsonify({"error": "Missing 'additional_parameter' in request body"}), 400
+
+    USERNAME = "user@hcl-software.com"
+    DISPLAYNAME = "user@hcl-software.com"
+    ACCESS_TOKEN = "xxxxxxxxxxxxxsssss"
+
+    API_USERNAME = "80d590a9-dd10-48b5-8437-0ed66ffefeea"
+    API_PASSWORD = "d64889b2-ad10-46ea-9230-5ede72da76ca"
+
+    credentials = f"{API_USERNAME}:{API_PASSWORD}"
+    token = base64.b64encode(credentials.encode()).decode()
+
+
+
+    payload = {
+    "username": USERNAME,
+    "displayname": DISPLAYNAME,
+    "access_token": ACCESS_TOKEN,
+    "additional_parameter": additional_parameter
+    }
+
+    headers = {
+        "Authorization": f"Basic {token}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        response = requests.post("https://hclswaichatbot.eu.bigfixaex.ai/external/api/token", headers=headers, json=payload)
+        return jsonify({
+            "status_code": response.status_code,
+            "response": response.text
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=3000, debug=True)

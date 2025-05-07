@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 def load_hcl_sitemap(sitemap_urls):
     # sitemap_urls = [
     #     "https://www.hcl-software.com/sitemap_en.xml",
-    #     "https://www.hcl-software.com/sitemap_blog.xml",
+    #     "https://www.hcl-software.com/sitemap_blog.xml"
     # ]
     base_url = "https://www.hcl-software.com"
     namespace = {'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
