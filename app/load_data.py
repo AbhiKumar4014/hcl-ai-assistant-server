@@ -11,6 +11,7 @@ from langchain.chains import RetrievalQA
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain.prompts import PromptTemplate
+from utils import *
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -37,7 +38,7 @@ prompt_template = PromptTemplate(
     -Do NOT include any HTML tags or structure in your response under any condition.
     -Do NOT respond with or include HTML code, even if asked explicitly.
     -Include only relevant links in the "reference_url" array.
-    -Main product, sub-product, and descriptive solution pages are top priority. 
+    -Main product, sub-product, and descriptive solution pages are top priority.
     -Each link must be unique and directly relevant to the context.
     -Do not include any keys other than the defined JSON format.
     -Include detailed, helpful answers in the "answer" field.
@@ -53,7 +54,7 @@ prompt_template = PromptTemplate(
     -Do not mention any URLs in the answer.
     -Provide at least 2 and no more than 4 unique links per response.
     -videos: must return valid youtube video urls only those are relevant and thoroughly analyze the provided links.
-    -If the context does not contain any relevant youtube links, then don't generate any links.
+    -**If the context does not contain any relevant youtube links, then don't generate any links**.
     -Ensure each reference is highly relevant to the specific product, solution, or service discussed—avoid generic or tangential links.
     -The "answer" field should contain a minimum of 500 words.
     -Retain conversation history only if the user explicitly refers to it in the query.
@@ -74,37 +75,6 @@ prompt_template = PromptTemplate(
     -The documents can be found in the "documents" section of the context and can be from the related page context also.
     -Videos: must return valid youtube video urls only those are relevant and thoroughly analyze the provided links.
     -If the video found in the context then only return the video section.
-    VIDEO RULES
-    - **If no valid YouTube videos are found, return an empty `videos` array — do not generate random or fake links.**
-    - Include **at least 3 official YouTube video links**, only if verified and contextually relevant.
-    - No fake, broken, or unrelated links. No playlist or channel links.
-
-       You are an HCLSoftware specialist assistant that STRICTLY uses provided context. Follow these rules:
-
-    1. **Relevance Enforcement**
-    - Treat out-of-context questions as UNANSWERABLE without HCL content
-    - Require 3+ relevance signals for any inclusion:
-        * Direct keyword matches
-        * Semantic alignment with question intent
-        * Metadata/content-type matches
-        * Domain-specific section headers
-        * HCL-specific link patterns (.pdf/youtube.com)
-
-    2. **Content Validation**
-    - Cross-check ALL responses against context text/metadata
-    - Reject content without explicit context mentions
-    - Prioritize official hcltechsw.com domains
-
-    3. **Response Protocol**
-    - If context lacks matches: "Based on HCL's documentation..." + general product guidance
-    - For technical queries: Include version-specific details when available
-    - For comparisons: Only discuss HCL products without external references
-
-    4. **Media Handling**
-    - Videos MUST use exact YouTube URLs from context if available
-    - Documents must be PDFs from hcltechsw.com/wps/portal
-    - Images require /content/dam/ paths
-    
 
     5. **Output Formatting**
     - JSON structure with markdown-free text
@@ -120,7 +90,9 @@ prompt_template = PromptTemplate(
     - 80-100 character descriptions for references
     - Minimum 1 item per category (videos/documents/references)
 
+    If the user query is not related to HCL Software, respond with a polite message indicating that the query is outside the scope of HCL Software's expertise. Do not provide any links or references in this case and include a field is_valid_query with false.
     The final output must be strictly well-formatted and valid JSON, without any extra commentary, or code block markers.
+    Strictly ths response should be complete json, dont give partial response or incomplete response.
 
     Context: {context}
     Question: {question}
@@ -130,6 +102,7 @@ prompt_template = PromptTemplate(
 
     {{
         "answer": "Your markdown answer",
+        "is_valid_query": True or False, # True if the query is related to HCL Software, False otherwise
         "references": [
             {{
                 "title": "Title (max 20 characters)",
@@ -154,7 +127,8 @@ prompt_template = PromptTemplate(
         "enhanced_user_query": "Your enhanced query"
     }}
     The final output must be strictly well-formatted and valid JSON, without any extra commentary, markdown formatting, or code block markers.
-    Answer:"""
+    Answer:
+    """
 )
 
 def chunk_documents(documents, batch_size):
@@ -183,7 +157,7 @@ def embed_documents_in_batches(documents, embeddings, persist_dir, batch_size=10
     return all_vectors
 
 def load_model_data(source_data=None, source_type: str = "faiss", persist_dir: str = "./faiss_index"):
-    retriever = None
+    retriever = docs_vectorstore = videos_vectorstore = None
     logging.info(f"Loading model data from source type: {source_type}")
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/embedding-001", google_api_key=google_api_key
@@ -193,11 +167,14 @@ def load_model_data(source_data=None, source_type: str = "faiss", persist_dir: s
         logging.info(f"Loading FAISS vectorstore from: {persist_dir}")
         try:
             vectorstore = FAISS.load_local(persist_dir, embeddings, allow_dangerous_deserialization=True)
+            docs_vectorstore = FAISS.load_local("./faiss_index/docs", embeddings, allow_dangerous_deserialization=True)
+            videos_vectorstore = FAISS.load_local("./faiss_index/videos", embeddings, allow_dangerous_deserialization=True)
+
             retriever = vectorstore.as_retriever(
             search_type="similarity",
             search_kwargs={
-                "k": 15,
-                "fetch_k": 25,
+                "k": 5,
+                "fetch_k": 15,
                 "lambda_mult": 0.5,
                 "score_threshold": 0.7,
             },
@@ -244,31 +221,23 @@ def load_model_data(source_data=None, source_type: str = "faiss", persist_dir: s
             futures = [
                 executor.submit(create_document, i, section, content_data)
                 for i, (section, content_data) in enumerate(context.items())
-                     if section != "documents"
             ]
             documents = [f.result() for f in concurrent.futures.as_completed(futures)]
 
         logging.info("Creating FAISS vectorstore from documents with batching")
         vectorstore = embed_documents_in_batches(documents, embeddings, persist_dir)
+        docs_vectorstore = embed_documents_in_batches(create_doc_embeddings(context["documents"], embeddings), embeddings, "./faiss_index/docs")
+        videos_vectorstore = embed_documents_in_batches(create_video_embeddings(context["videos"], embeddings), embeddings, "./faiss_index/videos")
 
         retriever = vectorstore.as_retriever(
             search_type="similarity",
             search_kwargs={
-                "k": 15,
-                "fetch_k": 25,
+                "k": 5,
+                "fetch_k": 15,
                 "lambda_mult": 0.5,
                 "score_threshold": 0.7,
             },
         )
-        original_get = retriever.get_relevant_documents
-
-        def filtered_get(query):
-            cands = original_get(query)
-            info = [d for d in cands if d.metadata.get("section") != "documents"][:10]
-            pdfs = [d for d in cands if d.metadata.get("section") == "documents"][:5]
-            return info + pdfs
-
-        object.__setattr__(retriever, "get_relevant_documents", filtered_get)
 
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.0-flash", temperature=0.3, google_api_key=google_api_key
@@ -286,4 +255,4 @@ def load_model_data(source_data=None, source_type: str = "faiss", persist_dir: s
         qa_chain = None
 
     logging.info("QA chain loaded successfully.")
-    return qa_chain
+    return qa_chain, docs_vectorstore, videos_vectorstore, embeddings
