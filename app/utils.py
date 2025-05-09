@@ -1,3 +1,7 @@
+import scrapetube
+from rapidfuzz import fuzz
+import numpy as np
+from sentence_transformers import SentenceTransformer, util
 import concurrent.futures
 import requests
 from bs4 import BeautifulSoup
@@ -197,3 +201,152 @@ def get_images(urls: list[str], count: int = 6) -> list[str]:
     # Ensure only `count` images are returned
     return collected_images[:count]
 
+
+def extract_channel_videos(channel_id: str="UC07b9GB8a-4c6-T6pd2bbBQ", limit: int = None):
+    videos = scrapetube.get_channel(channel_id=channel_id, limit=limit)
+    video_list = []
+
+    for video in videos:
+        video_id = video.get('videoId')
+        title = video.get('title', {}).get('runs', [{}])[0].get('text')
+        description = video.get('descriptionSnippet', {}).get('runs', [{}])[0].get('text') if 'descriptionSnippet' in video else None
+        published_time = video.get('publishedTimeText', {}).get('simpleText')
+        view_count = video.get('viewCountText', {}).get('simpleText')
+        thumbnail_url = video.get('thumbnail', {}).get('thumbnails', [{}])[-1].get('url') if 'thumbnail' in video else None
+        video_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else None
+
+        video_data = {
+            'videoId': video_id,
+            'title': title,
+            'description': description,
+            'publishedTime': published_time,
+            'viewCount': view_count,
+            'thumbnailUrl': thumbnail_url,
+            'videoUrl': video_url
+        }
+        video_list.append(video_data)
+
+    return {
+        'videos': video_list
+    }
+
+def load_data(json_path):
+    with open(json_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    return data
+
+from langchain.schema import Document
+
+def create_doc_embeddings(docs, embeddings):
+    documents = []
+    texts = []
+
+    for key in docs:
+        for doc in docs[key]:
+            title = doc.get('title', '')
+            url = doc.get('url', '')
+            combined_text = f"{title}. {url}"
+
+            # Create Document object
+            document = Document(page_content=combined_text, metadata={"title": title, "url": url})
+            documents.append(document)
+            texts.append(combined_text)
+
+    # Generate embeddings
+    embeddings_list = embeddings.embed_documents(texts)
+
+    # Attach embeddings to documents
+    for i, doc in enumerate(documents):
+        doc.metadata['embedding'] = embeddings_list[i]
+
+    return documents
+
+def create_video_embeddings(items, embeddings):
+    documents = []
+    texts = []
+
+    for item in items:
+        title = item.get('title', '')
+        description = item.get('description', '')
+        video_url = item.get('videoUrl', '')
+        thumbnail_url = item.get('thumbnailUrl', '')
+        combined_text = f"{title}. {description}. {video_url} {thumbnail_url}"
+
+        # Create Document object
+        document = Document(page_content=combined_text, metadata={"title": title, "description": description, "videoUrl": video_url, "thumbnailUrl": thumbnail_url})
+        documents.append(document)
+        texts.append(combined_text)
+
+    # Generate embeddings
+    embeddings_list = embeddings.embed_documents(texts)
+
+    # Attach embeddings to documents
+    for i, doc in enumerate(documents):
+        doc.metadata['embedding'] = embeddings_list[i]
+
+    return documents
+
+
+def search_videos(query_embedding, video_vectorstore, user_query_text, top_k=3):
+    """
+    Perform a similarity search in the vectorstore, then rerank results
+    by title (75%) and description (25%) matching the raw query text.
+    """
+    # Step 1: retrieve a superset of candidates
+    hits = video_vectorstore.similarity_search_by_vector(
+        query_embedding,
+        k=top_k,
+        fetch_k=10
+    )
+
+    # Prepare for reranking
+    scored = []
+    for doc in hits:
+        metadata = doc.metadata
+        title = metadata.get('title', '')
+        desc  = metadata.get('description', '')
+
+        # Compute fuzzy-match scores normalized to [0,1]
+        title_score = fuzz.token_sort_ratio(user_query_text, title) / 100.0
+        desc_score  = fuzz.token_sort_ratio(user_query_text, desc)  / 100.0
+
+        # Mix with 75% weight on title and 25% on description
+        mixed_score = 0.75 * title_score + 0.25 * desc_score
+
+        scored.append((mixed_score, doc))
+
+    # Step 2: sort by mixed score and select top_k
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_docs = [doc for _, doc in scored[:top_k]]
+
+    # Build result dicts
+    results = []
+    for doc in top_docs:
+        metadata = doc.metadata
+        video_info = {
+            'title': metadata.get('title'),
+            'description': metadata.get('description'),
+            'thumbnail_url': metadata.get('thumbnailUrl'),
+            'video_url': metadata.get('videoUrl'),
+            'score': round(next(score for score, d in scored if d == doc), 4)
+        }
+        results.append(video_info)
+
+    return results
+
+
+
+def search_documents(query_embedding, doc_vectorstore, top_k=3):
+    # Perform similarity search using the vectorstore
+    hits = doc_vectorstore.similarity_search_by_vector(query_embedding, k=top_k, fetch_k=20)
+
+    results = []
+    for doc in hits:
+        metadata = doc.metadata
+        doc_info = {
+            'title': metadata.get('title'),
+            'document_url': metadata.get('url'),
+            # 'score': round(doc.score, 4)  # Uncomment if 'score' attribute is available
+        }
+        results.append(doc_info)
+    return results
