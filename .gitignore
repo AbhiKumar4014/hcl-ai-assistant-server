@@ -2,3 +2,7 @@ test.js
 faiss_index/
 hcl_sites_data.json
 .env
+documents.json
+videos.json
+source_documents.json
+__pycache__/
