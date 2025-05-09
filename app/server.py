@@ -16,8 +16,8 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS
 
 # qa_chain = None
-# qa_chain = load_model_data(source_type="json_file", source_data="hcl_sites_data.json")
-qa_chain = load_model_data()
+# qa_chain, docs_vectorstore, videos_vectorstore, embeddings = load_model_data(source_type="json_file", source_data="hcl_sites_data.json")
+qa_chain, docs_vectorstore, videos_vectorstore, embeddings = load_model_data()
 
 @app.route("/query/health-check", methods=["GET"])
 def healthcheck():
@@ -45,32 +45,8 @@ def load():
     logging.info("Load requested")
     hcl_urls = load_hcl_sitemap(sitemap_urls)
     context = extract_all_text_parallel(hcl_urls)
-    doc_urls = extract_all_doc_urls()
-
-    # Initialize the documents list
-    context["documents"] = []
-
-    # Populate with name, variant, url, and source
-    for endpoint, docs_list in doc_urls.items():
-        for meta in docs_list:
-            raw = meta.get("title") or meta.get("name")
-            url = meta.get("url")
-            if not raw or not url:
-                continue
-
-            # split camelCase / PascalCase into words:
-            split = re.sub(r"(?<!^)(?=[A-Z])", " ", raw).strip()
-            # also make sure the version with spaces inserted if missing is covered:
-            spaced = re.sub(r"(\d+)", r" \1", split).strip()
-
-            context["documents"].append(
-                {
-                    "name": raw,  # e.g. "AppScan360" or "AppScan 360"
-                    "variant": spaced,  # e.g. "App Scan 360"
-                    "url": url,
-                    "source": endpoint,
-                }
-            )
+    context["documents"] = extract_all_doc_urls()
+    context["videos"] = extract_channel_videos()["videos"]
 
     with open("hcl_sites_data.json", "w") as file:
         json.dump(context, file)
@@ -86,7 +62,7 @@ def load():
 
 @app.route('/query/ask', methods=['POST'])
 def ask():
-    global qa_chain
+    global qa_chain, docs_vectorstore, videos_vectorstore, embeddings
 
     # Get data from JSON body
     data = request.get_json()
@@ -107,21 +83,14 @@ def ask():
 
     # Combine history with the current query if provided
     full_query = f"(Attached Last three conversation{history})\n{query}" if history else query
-    
-    def clean_json_input(text):
-        try:
-            cleaned = text.replace('\u2003', ' ').replace('\n', '')
-            return json.loads(cleaned)
-        except json.JSONDecodeError as e:
-            raise ValueError("Invalid JSON format: " + str(e))
-
     try:
         result = qa_chain.invoke(full_query)
-        source_docs = result.get("source_documents", [])
+        query_embeddings = embeddings.embed_query(query)
 
-        with open("source_documents.json", "w") as file:
-            logging.info("Saving source documents to source_documents.json")
-            json.dump([str(doc) for doc in source_docs], file, indent=4)
+        # source_docs = result.get("source_documents", [])
+        # with open("source_documents.json", "w") as file:
+        #     logging.info("Saving source documents to source_documents.json")
+        #     json.dump([str(doc) for doc in source_docs], file, indent=4)
 
         # Normalize response
         if isinstance(result, dict) and "result" in result:
@@ -142,43 +111,49 @@ def ask():
             raw_response = raw_response[: -len("```")].rstrip()
 
         # Parse the cleaned JSON
+        logging.info(f"Raw response JSON: {raw_response}")
         parsed = json.loads(raw_response)
-        if "videos" in parsed:
-            # logging.info(f"""{parsed["videos"]} found in parsed response""")
-            valid_videos = []
-            for video in parsed["videos"]:
-                url = video.get("video_url", "")
-                is_valid, thumbnail_url = is_youtube_video_valid(url)
-                if is_valid:
-                    video["thumbnail_url"] = thumbnail_url
-                    valid_videos.append(video)
-            parsed["videos"] = valid_videos  
+        logging.info(f"Parsed JSON: {parsed}")
+        if parsed.get("is_valid_query"):
+            if parsed.get("videos") == [] or len(parsed.get("videos")) < 3:
+                logging.info("Manually searching for videos")
+                existing_urls = {video['video_url'] for video in parsed.get("videos", [])}
+                relevant_videos = search_videos(query_embeddings, videos_vectorstore, query)
+                print(relevant_videos)
+                unique_videos = [video for video in relevant_videos if video['video_url'] not in existing_urls]
+                parsed["videos"].extend(unique_videos[:3 - len(parsed["videos"])])
 
-        if "documents" in parsed:
-            parsed["documents"] = parsed["documents"][:3]
-
-        source_page_urls = [doc.metadata.get("source_page_url", "") for doc in source_docs]
-        if source_page_urls:
-            images = get_images(source_page_urls, 6)
-            parsed["images"] = images
-
+            if parsed.get("documents") == [] or len(parsed.get("documents")) < 3:
+                logging.info("Manually searching for documents")
+                existing_urls = {doc['document_url'] for doc in parsed.get("documents", [])}
+                relevant_docs = search_documents(query_embeddings, docs_vectorstore)
+                unique_docs = [doc for doc in relevant_docs if doc['document_url'] not in existing_urls]
+                parsed["documents"].extend(unique_docs[:3 - len(parsed["documents"])])
 
         return jsonify(parsed)
 
     except json.JSONDecodeError as json_err:
         logging.warning(f"Primary JSON decode failed: {json_err}. \n Attempting fallback extraction")
-    
+
         answer = ""
         references = []
         videos = []
         documents = []
-    
+
         try:
             # Extract the "answer" field using regex
             answer_match = re.search(r'"answer"\s*:\s*"(.*?)"(,|\n|\r)', raw_response, re.DOTALL)
             if answer_match:
-                answer = json.loads(f'"{answer_match.group(1)}"')  # Safe unescaping
-    
+                try:
+                    # Attempt to parse the answer as JSON
+                    answer = json.loads(answer_match.group(1))
+                except json.JSONDecodeError:
+                    # If parsing fails, treat it as a string
+                    answer = answer_match.group(1).replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
+                    # answer = json.loads(f'"{answer}"')
+                    answer = answer_match.group(1)
+                    # answer = answer.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
+
             # Extract "references" array
             references_match = re.search(r'"references"\s*:\s*(\[[\s\S]*?\])', raw_response)
             if references_match:
@@ -186,7 +161,7 @@ def ask():
                     references = json.loads(references_match.group(1))
                 except json.JSONDecodeError:
                     logging.warning("Could not parse `references` field")
-    
+
             # Extract "videos" array
             videos_match = re.search(r'"videos"\s*:\s*(\[[\s\S]*?\])', raw_response)
             if videos_match:
@@ -194,7 +169,7 @@ def ask():
                     videos = json.loads(videos_match.group(1))
                 except json.JSONDecodeError:
                     logging.warning("Could not parse `videos` field")
-    
+
             # Extract "documents" array
             documents_match = re.search(r'"documents"\s*:\s*(\[[\s\S]*?\])', raw_response)
             if documents_match:
@@ -202,7 +177,7 @@ def ask():
                     documents = json.loads(documents_match.group(1))
                 except json.JSONDecodeError:
                     logging.warning("Could not parse `documents` field")
-    
+
             return jsonify({
                 "error": "Partial JSON parsing fallback triggered.",
                 "details": str(json_err),
@@ -212,7 +187,7 @@ def ask():
                 "documents": documents,
                 "raw": raw_response
             }), 200
-    
+
         except Exception as extract_err:
             logging.error(f"Manual fallback also failed: {extract_err}")
             return jsonify({
