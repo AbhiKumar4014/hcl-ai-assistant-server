@@ -6,9 +6,11 @@ import concurrent.futures
 import requests
 from bs4 import BeautifulSoup
 import logging
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, parse_qs
 import json
+import re
 import random
+from langchain.schema import Document
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -63,7 +65,6 @@ def extract_text_from_url(url: str) -> dict:
         logging.error(f"Error extracting text from URL: {url} - {e}")
         return None
 
-
 def extract_all_text_parallel(hcl_urls: dict, max_workers=10):
     context = {}
     tasks = []
@@ -81,8 +82,6 @@ def extract_all_text_parallel(hcl_urls: dict, max_workers=10):
                 context[site_name] = result
 
     return context
-
-
 
 def fetch_attachment_links(api_url: str, base_url: str) -> list[dict]:
     try:
@@ -119,7 +118,6 @@ def extract_all_doc_urls() -> dict:
                 response[endpoint] = data
     return response
 
-
 def is_youtube_video_valid(url: str) -> tuple[bool, str]:
     oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
     try:
@@ -134,8 +132,6 @@ def is_youtube_video_valid(url: str) -> tuple[bool, str]:
     except requests.RequestException as e:
         logging.error(f"Error checking YouTube video '{url}': {e}")
         return False, ""
-
-
 
 def get_images(urls: list[str], count: int = 6) -> list[str]:
     collected_images = []
@@ -201,7 +197,6 @@ def get_images(urls: list[str], count: int = 6) -> list[str]:
     # Ensure only `count` images are returned
     return collected_images[:count]
 
-
 def extract_channel_videos(channel_id: str="UC07b9GB8a-4c6-T6pd2bbBQ", limit: int = None):
     videos = scrapetube.get_channel(channel_id=channel_id, limit=limit)
     video_list = []
@@ -234,8 +229,6 @@ def load_data(json_path):
     with open(json_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
     return data
-
-from langchain.schema import Document
 
 def create_doc_embeddings(docs, embeddings):
     documents = []
@@ -286,7 +279,6 @@ def create_video_embeddings(items, embeddings):
 
     return documents
 
-
 def search_videos(query_embedding, video_vectorstore, user_query_text, top_k=3):
     """
     Perform a similarity search in the vectorstore, then rerank results
@@ -328,13 +320,11 @@ def search_videos(query_embedding, video_vectorstore, user_query_text, top_k=3):
             'description': metadata.get('description'),
             'thumbnail_url': metadata.get('thumbnailUrl'),
             'video_url': metadata.get('videoUrl'),
-            'score': round(next(score for score, d in scored if d == doc), 4)
+            "manual_search": True,
         }
         results.append(video_info)
 
     return results
-
-
 
 def search_documents(query_embedding, doc_vectorstore, top_k=3):
     # Perform similarity search using the vectorstore
@@ -345,8 +335,47 @@ def search_documents(query_embedding, doc_vectorstore, top_k=3):
         metadata = doc.metadata
         doc_info = {
             'title': metadata.get('title'),
+            'description': metadata.get('description'),
             'document_url': metadata.get('url'),
             # 'score': round(doc.score, 4)  # Uncomment if 'score' attribute is available
         }
         results.append(doc_info)
     return results
+
+ALLOWED_EXTENSIONS = ['pdf', 'docx', 'txt']
+
+
+def validate_document_url(url: str) -> bool:
+    url_pattern = re.compile(
+        r'^(https?://)?(www\.)?([\w-]+)\.[a-z]{2,6}(/\S*)?$'
+    )
+    if not re.match(url_pattern, url):
+        return False
+
+    # Parse the URL to extract the path and query parameters
+    parsed_url = urlparse(url)
+    path = parsed_url.path
+    query_params = parse_qs(parsed_url.query)
+
+    # Check file extension in path or query parameters
+    extensions = [ext for ext in ALLOWED_EXTENSIONS if path.lower().endswith(f'.{ext}')]
+
+    if not extensions:
+        for value in query_params.values():
+            for item in value:
+                if any(item.lower().endswith(f'.{ext}') for ext in ALLOWED_EXTENSIONS):
+                    extensions.append(item)
+
+    if not extensions:
+        return False
+
+    # Define allowed document content types
+    allowed_content_types = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword', 'text/plain']
+
+    try:
+        response = requests.head(url, allow_redirects=True, timeout=5)
+        content_type = response.headers.get('Content-Type')
+        return response.status_code == 200 and content_type in allowed_content_types
+
+    except requests.RequestException:
+        return False

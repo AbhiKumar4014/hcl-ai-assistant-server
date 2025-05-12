@@ -8,6 +8,7 @@ from load_data import *
 from utils import *
 import re
 import base64
+from document_video_processor import append_valid_documents_and_videos
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -15,9 +16,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 app = Flask(__name__)
 CORS(app)  # Enable CORS
 
+# For backup
 # qa_chain = None
 # qa_chain, docs_vectorstore, videos_vectorstore, embeddings = load_model_data(source_type="json_file", source_data="hcl_sites_data.json")
 qa_chain, docs_vectorstore, videos_vectorstore, embeddings = load_model_data()
+
 
 @app.route("/query/health-check", methods=["GET"])
 def healthcheck():
@@ -25,6 +28,7 @@ def healthcheck():
     if qa_chain is not None:
         return jsonify({"message": "Server is healthy and model loaded successfully"})
     return jsonify({"message": "Server is healthy!"})
+
 
 @app.route("/query/load", methods=["POST"])
 def load():
@@ -53,12 +57,12 @@ def load():
 
     qa_chain = load_model_data(context, source_type="json_object")
     if qa_chain is not None:
-        print(qa_chain)
         logging.info("Model loaded successfully")
         return jsonify({"message": "Model loaded successfully"})
     else:
         logging.error("Failed to load model")
         return jsonify({"error": "Failed to load model"}), 500
+
 
 @app.route('/query/ask', methods=['POST'])
 def ask():
@@ -85,12 +89,11 @@ def ask():
     full_query = f"(Attached Last three conversation{history})\n{query}" if history else query
     try:
         result = qa_chain.invoke(full_query)
-        query_embeddings = embeddings.embed_query(query)
 
-        # source_docs = result.get("source_documents", [])
-        # with open("source_documents.json", "w") as file:
-        #     logging.info("Saving source documents to source_documents.json")
-        #     json.dump([str(doc) for doc in source_docs], file, indent=4)
+        source_docs = result.get("source_documents", [])
+        with open("source_documents.json", "w") as file:
+            logging.info("Saving source documents to source_documents.json")
+            json.dump([str(doc) for doc in source_docs], file, indent=4)
 
         # Normalize response
         if isinstance(result, dict) and "result" in result:
@@ -108,28 +111,14 @@ def ask():
         if raw_response.startswith("```json"):
             raw_response = raw_response[len("```json"):].lstrip()
         if raw_response.endswith("```"):
-            raw_response = raw_response[: -len("```")].rstrip()
+            raw_response = raw_response[:-len("```")].rstrip()
 
         # Parse the cleaned JSON
-        logging.info(f"Raw response JSON: {raw_response}")
         parsed = json.loads(raw_response)
-        logging.info(f"Parsed JSON: {parsed}")
+        query_embeddings = embeddings.embed_query(parsed["enhanced_user_query"])
         if parsed.get("is_valid_query"):
-            if parsed.get("videos") == [] or len(parsed.get("videos")) < 3:
-                logging.info("Manually searching for videos")
-                existing_urls = {video['video_url'] for video in parsed.get("videos", [])}
-                relevant_videos = search_videos(query_embeddings, videos_vectorstore, query)
-                print(relevant_videos)
-                unique_videos = [video for video in relevant_videos if video['video_url'] not in existing_urls]
-                parsed["videos"].extend(unique_videos[:3 - len(parsed["videos"])])
-
-            if parsed.get("documents") == [] or len(parsed.get("documents")) < 3:
-                logging.info("Manually searching for documents")
-                existing_urls = {doc['document_url'] for doc in parsed.get("documents", [])}
-                relevant_docs = search_documents(query_embeddings, docs_vectorstore)
-                unique_docs = [doc for doc in relevant_docs if doc['document_url'] not in existing_urls]
-                parsed["documents"].extend(unique_docs[:3 - len(parsed["documents"])])
-
+            parsed = append_valid_documents_and_videos(parsed, query_embeddings, query, docs_vectorstore, videos_vectorstore)
+        del parsed["is_valid_query"]
         return jsonify(parsed)
 
     except json.JSONDecodeError as json_err:
@@ -139,9 +128,22 @@ def ask():
         references = []
         videos = []
         documents = []
+        enhanced_user_query = ""
+        is_valid_query = False
+        final_response = {}
 
         try:
-            # Extract the "answer" field using regex
+            is_valid_query_match = re.search(r'"is_valid_query"\s*:\s*(True|False)', raw_response, re.DOTALL)
+            if is_valid_query_match:
+                is_valid_query = is_valid_query_match.group(1).strip().lower() == "true"
+            enhanced_user_query_match = re.search(r'"enhanced_user_query"\s*:\s*"(.*?)"(,|\n|\r)', raw_response, re.DOTALL)
+
+            if enhanced_user_query_match:
+                raw_string = enhanced_user_query_match.group(1)
+                # Properly unescape using JSON loader
+                enhanced_user_query = json.loads(f'"{raw_string}"')
+
+                # Extract the "answer" field using regex
             answer_match = re.search(r'"answer"\s*:\s*"(.*?)"(,|\n|\r)', raw_response, re.DOTALL)
             if answer_match:
                 try:
@@ -150,9 +152,6 @@ def ask():
                 except json.JSONDecodeError:
                     # If parsing fails, treat it as a string
                     answer = answer_match.group(1).replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
-                    # answer = json.loads(f'"{answer}"')
-                    answer = answer_match.group(1)
-                    # answer = answer.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
 
             # Extract "references" array
             references_match = re.search(r'"references"\s*:\s*(\[[\s\S]*?\])', raw_response)
@@ -178,15 +177,20 @@ def ask():
                 except json.JSONDecodeError:
                     logging.warning("Could not parse `documents` field")
 
-            return jsonify({
-                "error": "Partial JSON parsing fallback triggered.",
-                "details": str(json_err),
+            logging.info(is_valid_query, type(is_valid_query))
+            final_response = {
                 "answer": answer,
                 "references": references,
                 "videos": videos,
                 "documents": documents,
-                "raw": raw_response
-            }), 200
+                "enhanced_user_query": enhanced_user_query,
+            }
+            if is_valid_query:
+                query_embeddings = embeddings.embed_query(enhanced_user_query)
+                final_response = append_valid_documents_and_videos(final_response, query_embeddings, query, docs_vectorstore, videos_vectorstore)
+
+
+            return jsonify(final_response), 200
 
         except Exception as extract_err:
             logging.error(f"Manual fallback also failed: {extract_err}")
@@ -202,6 +206,7 @@ def ask():
             "error": "Oops! Something went wrong while processing your request.",
             "details": str(e)
         }), 500
+
 
 @app.route('/query/call-chatbot-api', methods=['POST'])
 def call_chatbot_api():
@@ -220,8 +225,6 @@ def call_chatbot_api():
 
     credentials = f"{API_USERNAME}:{API_PASSWORD}"
     token = base64.b64encode(credentials.encode()).decode()
-
-
 
     payload = {
     "username": USERNAME,
