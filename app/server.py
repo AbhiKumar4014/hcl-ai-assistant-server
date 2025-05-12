@@ -66,10 +66,11 @@ def ask():
         }), 500
 
     # Combine history with the current query if provided
-    full_query = f"(Attached Last three conversation{history})\n{query}" if history else query
+    full_query = f"(Attached Last three conversations{history})\n{query}" if history else query
 
     try:
         result = qa_chain.invoke({"query": full_query})
+        # logging.info(f"test type {type(result["result"])}")
 
         # Normalize response
         if isinstance(result, dict) and "result" in result:
@@ -77,29 +78,82 @@ def ask():
         elif isinstance(result, str):
             raw_response = result.strip()
         else:
-            logging.error(f"Unexpected response format from model: {result}")
+            logging.error(f"Unexpected response format from model: {result}.")
             return jsonify({
                 "error": "Unexpected response format from model",
                 "details": str(result)
             }), 500
-
+        logging.info(f"Raw response: {raw_response}")
         # Remove only starting ```json and ending ``` (if present)
         if raw_response.startswith("```json"):
             raw_response = raw_response[len("```json"):].lstrip()
         if raw_response.endswith("```"):
             raw_response = raw_response[: -len("```")].rstrip()
 
+        logging.info(f"Raw response type: {type(raw_response)}")
         # Parse the cleaned JSON
+        # cleaned_response = raw_response.encode('utf-8').decode('unicode_escape')
         parsed = json.loads(raw_response)
         return jsonify(parsed)
 
+
+        # logging.info("Successfully processed query and returning result")
+        return jsonify(parsed)
+
     except json.JSONDecodeError as json_err:
-        logging.error(f"JSON parsing error: {json_err}, raw response: {raw_response}")
-        return jsonify({
-            "error": "Invalid JSON in model response.",
-            "details": str(json_err),
-            "raw": raw_response
-        }), 500
+            logging.warning(f"Primary JSON decode failed: {json_err}. \n Attempting fallback extraction")
+
+            answer = ""
+            references = []
+
+            try:
+                # Extract the "answer" field using regex
+                answer_match = re.search(r'"answer"\s*:\s*"(.*?)"(,|\n|\r)', raw_response, re.DOTALL)
+                answer = ""
+                if answer_match:
+                    try:
+                        answer = json.loads(f'"{answer_match.group(1)}"')  # Safe unescaping
+                    except json.JSONDecodeError:
+                        logging.warning("Could not parse `answer` field")
+                        answer = answer_match.group(1)
+
+                # Extract "references" array
+                references_match = re.search(r'"references"\s*:\s*(\[[\s\S]*?\])', raw_response)
+                references = []
+                if references_match:
+                    references_json = references_match.group(1)
+                    try:
+                        references = json.loads(references_json)
+                    except json.JSONDecodeError:
+                        logging.warning("Could not parse `references` field")
+
+                # Extract "videos" array
+                videos_match = re.search(r'"videos"\s*:\s*(\[[\s\S]*?\])', raw_response)
+                videos = []
+                if videos_match:
+                    videos_json = videos_match.group(1)
+                    try:
+                        videos = json.loads(videos_json)
+                    except json.JSONDecodeError:
+                        logging.warning("Could not parse `videos` field")
+
+                return jsonify({
+                    "error": "Partial JSON parsing fallback triggered.",
+                    "details": str(json_err),
+                    "answer": answer,
+                    "references": references,
+                    "videos": videos,
+                    "raw": raw_response
+                }), 200
+
+            except Exception as extract_err:
+                logging.error(f"Manual fallback also failed: {extract_err}")
+                return jsonify({
+                    "error": "JSON parsing failed and fallback also failed.",
+                    "details": str(json_err),
+                    "raw": raw_response
+                }), 206
+
 
     except Exception as e:
         logging.exception("Unexpected error during ask")
@@ -151,4 +205,4 @@ def call_chatbot_api():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000, debug=False)
+    app.run(host="0.0.0.0", port=3000, debug=True)
