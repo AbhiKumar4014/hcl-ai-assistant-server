@@ -1,9 +1,11 @@
+import requests
+import fitz  # PyMuPDF
+import io
 import scrapetube
 from rapidfuzz import fuzz
 import numpy as np
 from sentence_transformers import SentenceTransformer, util
 import concurrent.futures
-import requests
 from bs4 import BeautifulSoup
 import logging
 from urllib.parse import urljoin, urlparse, parse_qs
@@ -11,6 +13,7 @@ import json
 import re
 import random
 from langchain.schema import Document
+from docx import Document as DocxDocument  # Import for DOC/DOCX handling
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -112,11 +115,59 @@ def extract_all_doc_urls() -> dict:
         documents_urls = json.load(file)
     if documents_urls:
         for endpoint, url in documents_urls.items():
-            logging.info("Extracting")
+            logging.info(f"Extracting document urls from ${endpoint}")
             data = fetch_attachment_links(url, BASE_URL)
             if data:
                 response[endpoint] = data
     return response
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def extract_and_append_pdf_docx_text(metadata: dict) -> dict:
+    """
+    Extracts text content from PDF and DOC/DOCX files and adds it to each entry in the provided metadata.
+
+    Args:
+        metadata (dict): The metadata JSON object containing titles and URLs.
+
+    Returns:
+        dict: The updated metadata with extracted text content.
+    """
+    for endpoint, docs in metadata.items():
+        for doc in docs:
+            file_url = doc.get("url")
+            try:
+                response = requests.get(file_url)
+                response.raise_for_status()
+
+                file_bytes = io.BytesIO(response.content)
+                content = ""
+
+                # Determine file type by checking URL extension
+                if file_url.endswith(".pdf"):
+                    # Extract text from PDF
+                    document = fitz.open(stream=file_bytes, filetype="pdf")
+                    for page in document:
+                        content += page.get_text()
+                    document.close()
+                elif file_url.endswith(".docx") or file_url.endswith(".doc"):
+                    # Extract text from DOC/DOCX
+                    docx_document = DocxDocument(file_bytes)
+                    for para in docx_document.paragraphs:
+                        content += para.text + "\n"
+                else:
+                    logging.warning(f"Unsupported file type for URL: {file_url}")
+
+                # Add the extracted content to the metadata
+                doc["content"] = content
+
+            except Exception as e:
+                logging.error(f"Error extracting text from {file_url}: {e}")
+                doc["content"] = ""
+
+    return metadata
+
 
 def is_youtube_video_valid(url: str) -> tuple[bool, str]:
     oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
@@ -231,19 +282,33 @@ def load_data(json_path):
     return data
 
 def create_doc_embeddings(docs, embeddings):
+    """
+    Process only the 'documents' section in the context and generate embeddings.
+    """
     documents = []
     texts = []
 
-    for key in docs:
-        for doc in docs[key]:
-            title = doc.get('title', '')
-            url = doc.get('url', '')
-            combined_text = f"{title}. {url}"
+    # Process documents
+    for doc in docs:
+        title = doc.get('title', 'Unknown Document Title')
+        url = doc.get('document_url', 'Unknown Document URL')
+        # description = doc.get('description', 'No Description')
+        # content = doc.get('content', 'No Content')
 
-            # Create Document object
-            document = Document(page_content=combined_text, metadata={"title": title, "url": url})
-            documents.append(document)
-            texts.append(combined_text)
+        # Combine text for embedding
+        combined_text = f"{title}. {url}"
+
+        # Create Document object
+        document = Document(
+            page_content=combined_text,
+            metadata={
+                "type": "document",
+                "title": title,
+                "url": url,
+            }
+        )
+        documents.append(document)
+        texts.append(combined_text)
 
     # Generate embeddings
     embeddings_list = embeddings.embed_documents(texts)
@@ -253,6 +318,7 @@ def create_doc_embeddings(docs, embeddings):
         doc.metadata['embedding'] = embeddings_list[i]
 
     return documents
+
 
 def create_video_embeddings(items, embeddings):
     documents = []

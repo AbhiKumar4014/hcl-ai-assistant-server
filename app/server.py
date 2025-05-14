@@ -1,3 +1,4 @@
+import json
 import os
 from flask import Flask, json, request, jsonify
 from flask_cors import CORS
@@ -47,9 +48,28 @@ def load():
         return jsonify({"error": "'sitemap_url' must be a string or list of strings"}), 400
 
     logging.info("Load requested")
-    hcl_urls = load_hcl_sitemap(sitemap_urls)
-    context = extract_all_text_parallel(hcl_urls)
-    context["documents"] = extract_all_doc_urls()
+    # hcl_urls = load_hcl_sitemap(sitemap_urls)
+    context = {}
+
+# Read the JSON data
+    with open("hcl_sites_data.json", "r") as file:
+        data = json.load(file)
+
+    # Extracting data except "documents" and "videos"
+    # print(data)
+
+    # print(data_content)
+    # Remove "documents" and "videos" if they exist
+    data.pop("documents", None)
+    data.pop("videos", None)
+
+    # Now, data_content contains only the URLs
+    # print(data)
+
+    # context["content"] = extract_all_text_parallel(hcl_urls)
+    context["content"] = data
+    documents = extract_all_doc_urls()
+    context["documents"] = extract_and_append_pdf_text(documents)
     context["videos"] = extract_channel_videos()["videos"]
 
     with open("hcl_sites_data.json", "w") as file:
@@ -86,7 +106,7 @@ def ask():
         }), 500
 
     # Combine history with the current query if provided
-    full_query = f"(Attached Last three conversation{history})\n{query}" if history else query
+    full_query = f"{query}\n(Attached Last three conversation{history})\n" if history else query
     try:
         result = qa_chain.invoke(full_query)
 
@@ -177,7 +197,6 @@ def ask():
                 except json.JSONDecodeError:
                     logging.warning("Could not parse `documents` field")
 
-            logging.info(is_valid_query, type(is_valid_query))
             final_response = {
                 "answer": answer,
                 "references": references,

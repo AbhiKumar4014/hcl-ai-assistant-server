@@ -11,7 +11,7 @@ from langchain.chains import RetrievalQA
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain.prompts import PromptTemplate
-from utils import *
+from utils import *  # Assuming the necessary utils are imported from your utils module
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -24,42 +24,46 @@ prompt_template = PromptTemplate(
     input_variables=["context", "question"],
     template=""" You are a helpful and intelligent assistant that answers questions using information from the HCLSoftware website.
     You speak in a friendly, conversational way and include only relevant HCLSoftware URLs in a structured format.
+    You are a highly knowledgeable and professional assistant that provides comprehensive, accurate, and well-formatted responses based on information from the HCLSoftware website.
 
-    Instructions:
-    - Prioritize official HCLSoftware product, solution, and service pages.
-    - If they ask about HCL products, provide detailed and informative responses.
-    - If the user greets, respond meaningfully and suggest they explore HCL products.
-    - If a scenario is given, understand the intent and suggest suitable HCL products based on the context.
-    - If the query includes blog then refer to the blog context.
+    Response Guidelines:
+    - Maintain a friendly, informative, and conversational tone.
+    - Use structured formatting, including headings, bullet points, and numbered lists where appropriate.
+    - Provide detailed, well-researched, and descriptive responses with a minimum of 500 words, thoroughly addressing the query.
+    - Include only relevant HCLSoftware URLs using the specified JSON format, prioritizing official product, solution, and service pages.
+
+    Reference Inclusion:
+    - Include up-to-date product, solution, or service links, prioritizing official HCLSoftware pages.
+    - If the query is blog-related, prioritize blog links and clearly state the "Source" URL.
+    - Ensure transparency and traceability by accurately identifying content origins.
     - Avoid stating that something is "not related to HCLSoftware" unless it clearly isn’t.
-    - Do NOT include URLs inside the "answer" field.
-    - Do NOT include any HTML tags or structure in your response under any condition.
-    - Do NOT respond with or include HTML code, even if asked explicitly.
-    - Include only relevant links in the "reference_url" array.
-    - Main product, sub-product, and descriptive solution pages are top priority. Blog links should be used only when no better official product or solution page exists.
-    - Each link must be unique and directly relevant to the context.
-    - Do not include any keys other than the defined JSON format.
-    - Include detailed, helpful answers in the "answer" field.
-    - Include correct "Contact Us" or support links if relevant to the product mentioned.
-    - Provide answers in markdown format, but DO NOT use code block markers.
-    - The "description" key in each reference JSON must summarize the relevance in max 80 characters.
-    - Be professional, courteous, and informative at all times.
-    - Avoid opinions, speculation, or comparisons with any third-party vendors, tools, or platforms.
-    - Don't mention any links or url's in the answer field.
-    - Include correct "Contact Us" or support links if relevant to the product mentioned.
-    - One contact link must be included in the references.
-    - Give maximum of 4 items in the references section or field.
-    - Videos: must return valid youtube video urls only those are relevant and thoroughly analyze the provided links.
-    - If the video found in the context then only return the video section.
-    -videos: must return valid youtube video urls only those are relevant and thoroughly analyze the provided links.
-    -**If the context does not contain any relevant youtube links, then don't generate any links**.
-    - The documents can be found in the "documents" section of the context and can be from the related page context also.
-    - Add blog links in references if the user query is blog that should be the source document url
-    If the user query is related to specific blog then add the document "Source" url in context to the references
-    **Note:**
-       - If the user query is related to blogs in HCL Software, provide at least three accurate and contextually relevant references to those blogs.
+    - Limit references to the most relevant links, ensuring they are unique and contextually appropriate.
+    - Include at least one contact link in every response. If the query specifies a particular product, include the relevant product-specific contact page.
 
-    - The answer key in response should be descriptive and should contain minimum 500 words.
+    Response Structure:
+    - Deliver responses in markdown format, without code block markers.
+    - Avoid including URLs in the "answer" field; only use the "reference_url" array.
+    - Each reference JSON must include a brief, informative description summarizing its relevance.
+    - Ensure the contact or support link is included and contextually relevant.
+
+    Video Content:
+    - Include only verified, contextually relevant YouTube video links found in the source context.
+    - If no relevant video is available, do not generate or include a video link.
+
+    Formatting and Structure:
+    - Maintain structured formatting in responses, using headings, bullet points, and lists.
+    - Ensure each response is clear, well-organized, and easy to navigate.
+    - Do not include any HTML tags, code, or HTML formatting in the "answer" field under any circumstances.
+    - Responses must not hardcode any specific count for links or references; ensure relevance and contextual accuracy.
+
+    History Handling:
+    - Retain conversation context only when explicitly referenced by the user, ensuring each response remains focused and relevant to the immediate query.
+    - Avoid using previous conversation context unless the user clearly refers to it.
+
+    Content Limitations:
+    - Do not provide opinions, speculative content, or comparisons with third-party platforms.
+    - Maintain professionalism, accuracy, and relevance in all responses.
+
     - The assistant should retain conversation history for context but not let it influence responses unless the user explicitly refers to it in their query. History should be considered only when directly mentioned or requested by the user.
     The final output must be strictly well-formatted and valid JSON, without any extra commentary, or code block markers.
 
@@ -68,41 +72,27 @@ prompt_template = PromptTemplate(
 
     You must respond strictly using the following JSON structure, with no markdown, no extra commentary, and no code block markers:
 
-    {{
-        "answer": "Your markdown answer",
-        "is_valid_query": True or False, # True if the enhanced user query is related to HCL Software/HCL blogs .. related to HCl, False otherwise
-        "references": [
-            {{
-                "title": "Title (max 20 characters)",
-                "reference_url": "", # max 4 references
-                "description": "Short summary (max 80 characters)"
-            }}
-        ],
-        "videos": [
-            {{
-                "title": "Short video title (max 20 characters)",
-                "video_url": "Exact YouTube URL (must be a direct YouTube video link, no channel links, strictly related to HCL, no image links or non-YouTube URLs)",
-                "description": "Brief summary of the video content (max 100 characters)"
-            }}
-        ],
-        "documents": [
-            {{
-                "title": "Short document title (max 20 chars)",
-                "document_url": "Exact document link from context(Should be valid PDF link, no other formats)",
-                "description": "Brief summary of document (max 100 chars)"
-            }}
-        ],
-        "enhanced_user_query": "Your enhanced query"
-    }}
-    The final output must be strictly well-formatted and valid JSON, without any extra commentary, markdown formatting, or code block markers.
-    Answer:
+    {{"answer": "Your markdown answer",
+    "is_valid_query": True or False,
+    "references": [{{"title": "Title (max 20 characters)",
+                    "reference_url": "",
+                    "description": "Short summary (max 80 characters)"}}],
+    "videos": [{{"title": "Short video title (max 20 characters)",
+                    "video_url": "Exact YouTube URL",
+                    "description": "Brief summary of the video"}}],
+    "documents": [{{"title": "Short document title",
+                    "document_url": "Exact document link",
+                    "description": "Brief summary of document"}}],
+    "enhanced_user_query": "Your enhanced query"}}
     """
 )
 
+# Define the chunking function for document embedding
 def chunk_documents(documents, batch_size):
     for i in range(0, len(documents), batch_size):
         yield documents[i:i + batch_size]
 
+# Define the function for embedding documents in batches
 def embed_documents_in_batches(documents, embeddings, persist_dir, batch_size=100, delay=45):
     logging.info("Embedding documents in batches to respect rate limits.")
     all_vectors = None
@@ -124,6 +114,73 @@ def embed_documents_in_batches(documents, embeddings, persist_dir, batch_size=10
         logging.info("FAISS vectorstore saved locally.")
     return all_vectors
 
+# Helper function to create URL documents
+def create_url_document(entry_id, content_data):
+    if content_data is None or not isinstance(content_data, dict):
+        logging.warning(f"Skipping URL entry {entry_id} with unknown source")
+        return None
+
+    title = content_data.get("title", "unknown")
+    description = content_data.get("description", "unknown")
+    source_url = content_data.get("source_page_url", "unknown")
+    page_text = content_data.get("page_text", "unknown")
+    page_content = f"[Source: {source_url}]\n\n{page_text}"
+
+    return Document(
+        page_content=page_content,
+        metadata={
+            "source": source_url,
+            "title": title,
+            "description": description,
+            "entry_id": entry_id,
+        },
+    )
+
+# Helper function to create document content
+def create_document_document(entry_id, content_data):
+    if content_data is None or not isinstance(content_data, dict):
+        logging.warning(f"Skipping Document entry {entry_id} with unknown source")
+        return None
+
+    title = content_data.get("title", "unknown")
+    description = content_data.get("description", "unknown")
+    document_url = content_data.get("document_url", "unknown")
+    page_text = content_data.get("content", "unknown")
+    page_content = f"[Document URL: {document_url}]\n\n{page_text}"
+
+    return Document(
+        page_content=page_content,
+        metadata={
+            "source": document_url,
+            "title": title,
+            "description": description,
+            "entry_id": entry_id,
+        },
+    )
+
+# Helper function to create video content
+def create_video_document(entry_id, content_data):
+    if content_data is None or not isinstance(content_data, dict):
+        logging.warning(f"Skipping Video entry {entry_id} with unknown source")
+        return None
+
+    title = content_data.get("title", "unknown")
+    description = content_data.get("description", "unknown")
+    video_url = content_data.get("videoUrl", "unknown")
+    video_description = content_data.get("description", "unknown")
+    page_content = f"[Video URL: {video_url}]\n\n{video_description}"
+
+    return Document(
+        page_content=page_content,
+        metadata={
+            "source": video_url,
+            "title": title,
+            "description": description,
+            "entry_id": entry_id,
+        },
+    )
+
+# Function to load model data from various sources
 def load_model_data(source_data=None, source_type: str = "faiss", persist_dir: str = "./faiss_index"):
     retriever = docs_vectorstore = videos_vectorstore = None
     logging.info(f"Loading model data from source type: {source_type}")
@@ -139,14 +196,14 @@ def load_model_data(source_data=None, source_type: str = "faiss", persist_dir: s
             videos_vectorstore = FAISS.load_local("./faiss_index/videos", embeddings, allow_dangerous_deserialization=True)
 
             retriever = vectorstore.as_retriever(
-            search_type="mmr",
-            search_kwargs={
-                "k": 10,
-                "fetch_k": 50,
-                "lambda_mult": 0.5,
-                "score_threshold": 0.7,
-            },
-        )
+                search_type="similarity",
+                search_kwargs={
+                    "k": 10,
+                    "fetch_k": 50,
+                    "lambda_mult": 0.5,
+                    "score_threshold": 0.7,
+                },
+            )
             logging.info("FAISS vectorstore loaded successfully.")
         except Exception as e:
             logging.error(f"Error loading FAISS vectorstore: {e}")
@@ -164,36 +221,29 @@ def load_model_data(source_data=None, source_type: str = "faiss", persist_dir: s
         else:
             raise ValueError("Invalid source_type. Must be 'faiss', 'json_file', or 'json_object'.")
 
-        def create_document(entry_id, section, content_data):
-            if content_data is None or not isinstance(content_data, dict):
-                logging.warning(f"Skipping entry {entry_id} with unknown source URL")
-                return None
-            source_url = content_data.get("source_page_url", "unknown")
-            page_text = content_data.get("page_text", "unknown")
-            page_title = content_data.get("title", "unknown")
-            page_description = content_data.get("description", "unknown")
-            page_content = f"[Source: {source_url}]\n\n{page_text}"
-            return Document(
-                page_content=page_content,
-                metadata={
-                    "source": source_url,
-                    "title": page_title,
-                    "description": page_description,
-                    "section": section,
-                    "entry_id": entry_id,
-                },
-            )
-
         logging.info(f"Creating documents from context with {len(context)} entries")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
-            futures = [
-                executor.submit(create_document, i, section, content_data)
-                for i, (section, content_data) in enumerate(context.items())
-            ]
-            documents = [f.result() for f in concurrent.futures.as_completed(futures)]
+        all_documents = []
+
+        # Process content (URL type)
+        for i, content_data in enumerate(context.get("content", [])):
+            document = create_url_document(i, content_data)
+            if document:
+                all_documents.append(document)
+
+        # Process documents (Document type)
+        for i, content_data in enumerate(context.get("documents", [])):
+            document = create_document_document(i, content_data)
+            if document:
+                all_documents.append(document)
+
+        # Process videos (Video type)
+        for i, content_data in enumerate(context.get("videos", [])):
+            document = create_video_document(i, content_data)
+            if document:
+                all_documents.append(document)
 
         logging.info("Creating FAISS vectorstore from documents with batching")
-        vectorstore = embed_documents_in_batches(documents, embeddings, persist_dir)
+        vectorstore = embed_documents_in_batches(all_documents, embeddings, persist_dir)
         docs_vectorstore = embed_documents_in_batches(create_doc_embeddings(context["documents"], embeddings), embeddings, "./faiss_index/docs")
         videos_vectorstore = embed_documents_in_batches(create_video_embeddings(context["videos"], embeddings), embeddings, "./faiss_index/videos")
 

@@ -11,3 +11,4 @@ gunicorn
 faiss-cpu
 dotenv
 scrapetube
+pymupdf
