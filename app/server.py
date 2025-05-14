@@ -1,13 +1,13 @@
-import os
+import re
+import base64
+import logging
+
 from flask import Flask, json, request, jsonify
 from flask_cors import CORS
-import logging
 
 from load_page_urls import *
 from load_data import *
 from utils import *
-import re
-import base64
 from document_video_processor import append_valid_documents_and_videos
 
 # Configure logging
@@ -19,8 +19,8 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS
 
 # For backup
-qa_chain = None
 # qa_chain, docs_vectorstore, videos_vectorstore, embeddings = load_model_data(source_type="json_file", source_data="hcl_sites_data.json")
+
 qa_chain, vectorstore, docs_vectorstore, videos_vectorstore, embeddings = (
     load_model_data()
 )
@@ -28,10 +28,24 @@ qa_chain, vectorstore, docs_vectorstore, videos_vectorstore, embeddings = (
 
 @app.route("/query/health-check", methods=["GET"])
 def healthcheck():
-    logging.info("Health check requested")
-    if qa_chain is not None:
-        return jsonify({"message": "Server is healthy and model loaded successfully"})
-    return jsonify({"message": "Server is healthy!"})
+    health_status = {
+        "qa_chain_loaded": qa_chain is not None,
+        "vectorstore_loaded": vectorstore is not None,
+        "docs_vectorstore_loaded": docs_vectorstore is not None,
+        "videos_vectorstore_loaded": videos_vectorstore is not None,
+        "embeddings_loaded": embeddings is not None,
+    }
+    # Determine overall model readiness
+    all_loaded = all(list(health_status.values()))
+
+    message = (
+        "Server is healthy and model loaded successfully"
+        if all_loaded
+        else "Server healthy, but some components are not loaded"
+    )
+    return jsonify({"message": message, "status": health_status}), (
+        200 if all_loaded else 206
+    )
 
 
 @app.route("/query/load", methods=["POST"])
@@ -56,15 +70,27 @@ def load():
         )
 
     logging.info("Load requested")
-    hcl_urls = load_hcl_sitemap(sitemap_urls)
-    context = extract_all_text_parallel(hcl_urls)
-    context["documents"] = extract_all_doc_urls()
-    context["videos"] = extract_channel_videos()["videos"]
 
+    hcl_urls = load_hcl_sitemap(sitemap_urls)  # Load HCL sitemap URLs
+    if not hcl_urls:
+        logging.error("Failed to load HCL sitemap URLs")
+        return jsonify(
+            {"error": "Failed to load HCL sitemap URLs or no URLs found"}
+        ), 400
+
+    context = extract_all_text_parallel(hcl_urls)  # Extract text from HCL URLs
+
+    context["documents"] = extract_all_doc_urls()  # Extract document URLs
+
+    context["videos"] = extract_channel_videos()["videos"]  # Extract video URLs
+
+    # Save the context to a JSON file for backup
     with open("hcl_sites_data.json", "w") as file:
         json.dump(context, file)
 
+    # Load the model with the context
     qa_chain = load_model_data(context, source_type="json_object")
+
     if qa_chain is not None:
         logging.info("Model loaded successfully")
         return jsonify({"message": "Model loaded successfully"})
@@ -120,7 +146,6 @@ def ask():
 
         # Step 3: Merge and de-duplicate documents
         combined_docs = docs_query_only + docs_query_plus_history
-        # Optional: remove duplicates (based on content hash or metadata)
         unique_docs = []
         seen_hashes = set()
         for doc in combined_docs:
@@ -129,21 +154,9 @@ def ask():
                 unique_docs.append(doc)
                 seen_hashes.add(content_hash)
 
-        with open("docs.json", "w") as file:
-            logging.info("Saving source documents")
-            json.dump(
-                [
-                    {"content": doc.page_content, "metadata": doc.metadata}
-                    for doc in unique_docs
-                ],
-                file,
-                indent=2,
-            )
-
-        # Step 4: Add into parsed or pass into chain
-        # Optionally: pass into QA chain if supported
+        # Step 4: Pass question and context into qa_chain
         result = qa_chain.run({"question": full_query, "context": unique_docs})
-
+    
         # Normalize response
         if isinstance(result, dict) and "result" in result:
             raw_response = result["result"].strip()
