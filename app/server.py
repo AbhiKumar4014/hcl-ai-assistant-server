@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 import re
 import base64
 import logging
@@ -127,22 +128,29 @@ def ask():
 
     # Combine history with the current query if provided
     full_query = (
-        f"{query}\n\nPrevious conversation context:\n{history}" if history else query
+        f"{query}\n\n[Previous three conversation:\n{history}]" if history else query
     )
     try:
-        # Step 1: Embed plain query (60%)
-        query_only_embedding = embeddings.embed_query(query)
-        docs_query_only = vectorstore.similarity_search_by_vector(
-            query_only_embedding, k=8
-        )
 
-        # Step 2: Embed query + trimmed history (40%)
-        history_trimmed = history if history else ""
-        combined_query = f"{query} {history_trimmed}"
-        combined_embedding = embeddings.embed_query(combined_query)
-        docs_query_plus_history = vectorstore.similarity_search_by_vector(
-            combined_embedding, k=7
-        )
+        # Step 1 & 2: Run both embeddings and vectorstore searches in parallel
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_query_only = executor.submit(
+                lambda: vectorstore.max_marginal_relevance_search_by_vector(
+                    embeddings.embed_query(query), k=8, fetch_k=20
+                )
+            )
+
+            history_trimmed = history if history else ""
+            combined_query = f"{query} {history_trimmed}"
+            future_query_plus_history = executor.submit(
+                lambda: vectorstore.max_marginal_relevance_search_by_vector(
+                    embeddings.embed_query(combined_query), k=10, fetch_k=20
+                )
+            )
+
+        # Wait for both to complete
+        docs_query_only = future_query_only.result()
+        docs_query_plus_history = future_query_plus_history.result()
 
         # Step 3: Merge and de-duplicate documents
         combined_docs = docs_query_only + docs_query_plus_history
@@ -155,7 +163,7 @@ def ask():
                 seen_hashes.add(content_hash)
 
         # Step 4: Pass question and context into qa_chain
-        result = qa_chain.run({"question": full_query, "context": unique_docs})
+        result = qa_chain.invoke({"question": full_query, "context": unique_docs})
     
         # Normalize response
         if isinstance(result, dict) and "result" in result:

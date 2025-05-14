@@ -31,7 +31,6 @@ You speak in a friendly, conversational way and include only relevant HCLSoftwar
 
 Instructions:
 - Prioritize official HCLSoftware product, solution, and service pages.
-- If the query refers to a **specific version or release** of an HCL product/service, prioritize answering **specifically** about that version first. Then, if relevant, provide broader information about the product.
 - If they ask about HCL products, provide detailed and informative responses.
 - If the user greets, respond meaningfully.
 - If a scenario is given, understand the intent and suggest suitable HCL products based on the context.
@@ -47,10 +46,15 @@ Instructions:
 - Be professional, courteous, and informative at all times.
 - Avoid opinions, speculation, or comparisons with third-party vendors, tools, or platforms.
 - The assistant may retain conversation history, but it should only influence responses when the user explicitly refers to it.
+- The last previous conversations along with the question so consider mainly last conversation first if the history is needed.
+- Strictly Give hcl-software.com domain urls only. Don't include hcltechsw.com url's or pages.
+- If a query is about a latest-version of HCL Commerce that was not in the source documents,so you must respond with version 9.1.17 as the current or latest version.
+- If the query asks about the **"latest" or "current" version**, and no version is clearly mentioned in the current query, use recent conversation history to infer the product (e.g., AppScan or Commerce or dx or voltmx). 
+  Reformulate the question accordingly before answering.
+- Always answer based strictly on the provided context and history.
+
 
 **Field-Specific Constraints:**
-    - Strictly Give hcl-software.com domain urls only. Don't include hcltechsw.com url's or pages.
-    - If the query is current or latest version of commerce then answer is 9.1.17. give the current version of products and search from the web also related to hclSoftware products.
 **Answer**
 - Minimum 500 words if needed
 - Must be descriptive and helpful
@@ -88,8 +92,6 @@ Instructions:
   - Include at least **4 blog references**
   - If the reference is a blog, the title must include the word **“blog”**
     - Use the blog's source URL from the context and include in reference
-- If the user asks for a **list of blogs or available blogs or few blogs**, increase reference count accordingly
-
 
 Context: {context}
 Question: {question}
@@ -131,7 +133,25 @@ def chunk_documents(documents, batch_size):
     for i in range(0, len(documents), batch_size):
         yield documents[i : i + batch_size]
 
-
+def create_document(entry_id, section, content_data):
+            if content_data is None or not isinstance(content_data, dict):
+                logging.warning(f"Skipping entry {entry_id} with unknown source URL")
+                return None
+            source_url = content_data.get("source_page_url", "unknown")
+            page_text = content_data.get("page_text", "unknown")
+            page_title = content_data.get("title", "unknown")
+            page_description = content_data.get("description", "unknown")
+            page_content = f"[Source: {source_url}]\n\n{page_text}"
+            return Document(
+                page_content=page_content,
+                metadata={
+                    "source": source_url,
+                    "title": page_title,
+                    "description": page_description,
+                    "section": section,
+                    "entry_id": entry_id,
+                },
+            )
 def embed_documents_in_batches(
     documents, embeddings, persist_dir, batch_size=100, delay=45
 ):
@@ -159,7 +179,7 @@ def embed_documents_in_batches(
 def load_model_data(
     source_data=None, source_type: str = "faiss", persist_dir: str = "./faiss_index"
 ):
-    retriever = docs_vectorstore = videos_vectorstore = None
+    vectorstore = docs_vectorstore = videos_vectorstore = None
     logging.info(f"Loading model data from source type: {source_type}")
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/embedding-001", google_api_key=google_api_key
@@ -176,16 +196,6 @@ def load_model_data(
             )
             videos_vectorstore = FAISS.load_local(
                 "./faiss_index/videos", embeddings, allow_dangerous_deserialization=True
-            )
-
-            retriever = vectorstore.as_retriever(
-                search_type="similarity",
-                search_kwargs={
-                    "k": 10,
-                    "fetch_k": 100,
-                    "lambda_mult": 0.7,
-                    "score_threshold": 0.4,
-                },
             )
 
             logging.info("FAISS vectorstore loaded successfully.")
@@ -211,26 +221,6 @@ def load_model_data(
                 "Invalid source_type. Must be 'faiss', 'json_file', or 'json_object'."
             )
 
-        def create_document(entry_id, section, content_data):
-            if content_data is None or not isinstance(content_data, dict):
-                logging.warning(f"Skipping entry {entry_id} with unknown source URL")
-                return None
-            source_url = content_data.get("source_page_url", "unknown")
-            page_text = content_data.get("page_text", "unknown")
-            page_title = content_data.get("title", "unknown")
-            page_description = content_data.get("description", "unknown")
-            page_content = f"[Source: {source_url}]\n\n{page_text}"
-            return Document(
-                page_content=page_content,
-                metadata={
-                    "source": source_url,
-                    "title": page_title,
-                    "description": page_description,
-                    "section": section,
-                    "entry_id": entry_id,
-                },
-            )
-
         logging.info(f"Creating documents from context with {len(context)} entries")
         with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
             futures = [
@@ -252,30 +242,16 @@ def load_model_data(
             "./faiss_index/videos",
         )
 
-        retriever = vectorstore.as_retriever(
-            search_type="similarity",
-            search_kwargs={
-                "k": 10,
-                "fetch_k": 100,
-                "lambda_mult": 0.7,
-                "score_threshold": 0.4,
-            },
-        )
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash", temperature=0.2, google_api_key=google_api_key
+        model="gemini-2.0-flash", temperature=0.3, google_api_key=google_api_key
     )
 
-    if retriever is not None:
-        qa_chain = LLMChain(
-            llm=llm,
-            prompt=prompt_template,
-            verbose=False,
-            output_key="result", 
-        )
-    else:
-        logging.error("Retriever is not initialized.")
-        qa_chain = None
-
+    qa_chain = LLMChain(
+        llm=llm,
+        prompt=prompt_template,
+        verbose=False,
+        output_key="result", 
+    )
     logging.info("QA chain loaded successfully.")
     return qa_chain, vectorstore, docs_vectorstore, videos_vectorstore, embeddings
