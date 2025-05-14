@@ -8,3 +8,4 @@ source_documents.json
 __pycache__/
 /venv
 *.zip
+docs.json
