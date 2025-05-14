@@ -6,3 +6,5 @@ documents.json
 videos.json
 source_documents.json
 __pycache__/
+/venv
+*.zip
