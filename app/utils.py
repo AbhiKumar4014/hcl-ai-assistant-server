@@ -1,7 +1,6 @@
 import scrapetube
 from rapidfuzz import fuzz
 import numpy as np
-from sentence_transformers import SentenceTransformer, util
 import concurrent.futures
 import requests
 from bs4 import BeautifulSoup
