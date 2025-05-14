@@ -1,16 +1,17 @@
-from pathlib import Path
-import json
-import concurrent.futures
-import time
-from dotenv import load_dotenv
 import os
+import time
+import json
 import logging
+import concurrent.futures
+from pathlib import Path
 
+from dotenv import load_dotenv
 from langchain.docstore.document import Document
 from langchain.chains import LLMChain
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain.prompts import PromptTemplate
+
 from utils import *
 
 # Configure logging
@@ -48,7 +49,8 @@ Instructions:
 - The assistant may retain conversation history, but it should only influence responses when the user explicitly refers to it.
 
 **Field-Specific Constraints:**
-
+    - Strictly Give hcl-software.com domain urls only. Don't include hcltechsw.com url's or pages.
+    - If the query is current or latest version of commerce then answer is 9.1.17. give the current version of products and search from the web also related to hclSoftware products.
 **Answer**
 - Minimum 500 words if needed
 - Must be descriptive and helpful
@@ -268,7 +270,7 @@ def load_model_data(
         qa_chain = LLMChain(
             llm=llm,
             prompt=prompt_template,
-            verbose=True,
+            verbose=False,
             output_key="result", 
         )
     else:
