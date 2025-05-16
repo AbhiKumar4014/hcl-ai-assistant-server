@@ -12,4 +12,3 @@ faiss-cpu
 dotenv
 scrapetube
 rapidfuzz
-pydantic

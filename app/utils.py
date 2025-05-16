@@ -251,8 +251,8 @@ def search_videos(query_embedding, video_vectorstore, user_query_text, top_k=3):
     by title (75%) and description (25%) matching the raw query text.
     """
     # Step 1: retrieve a superset of candidates
-    hits = video_vectorstore.similarity_search_by_vector(
-        query_embedding, k=top_k, fetch_k=10
+    hits = video_vectorstore.max_marginal_relevance_search_by_vector(
+        query_embedding, k=top_k, fetch_k=20
     )
 
     # Prepare for reranking
@@ -293,7 +293,7 @@ def search_videos(query_embedding, video_vectorstore, user_query_text, top_k=3):
 
 def search_documents(query_embedding, doc_vectorstore, top_k=3):
     # Perform similarity search using the vectorstore
-    hits = doc_vectorstore.similarity_search_by_vector(
+    hits = doc_vectorstore.max_marginal_relevance_search_by_vector(
         query_embedding, k=top_k, fetch_k=20
     )
 

@@ -5,6 +5,7 @@ import logging
 
 from flask import Flask, json, request, jsonify
 from flask_cors import CORS
+from langchain_core.messages import AIMessage
 
 from load_page_urls import *
 from load_data import *
@@ -131,46 +132,63 @@ def ask():
         f"{query}\n\n[Previous three conversation:\n{history}]" if history else query
     )
     try:
-
         # Step 1 & 2: Run both embeddings and vectorstore searches in parallel
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future_query_only = executor.submit(
-                lambda: vectorstore.max_marginal_relevance_search_by_vector(
-                    embeddings.embed_query(query), k=8, fetch_k=20
-                )
+        if not history:
+            # No history: single search with broader scope
+            unique_docs = vectorstore.max_marginal_relevance_search_by_vector(
+                embeddings.embed_query(query), k=20, fetch_k=20
             )
-
-            history_trimmed = history if history else ""
-            combined_query = f"{query} {history_trimmed}"
-            future_query_plus_history = executor.submit(
-                lambda: vectorstore.max_marginal_relevance_search_by_vector(
-                    embeddings.embed_query(combined_query), k=10, fetch_k=20
+        else:
+            # With history: run both searches in parallel
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future_query_only = executor.submit(
+                    lambda: vectorstore.max_marginal_relevance_search_by_vector(
+                        embeddings.embed_query(query), k=8, fetch_k=20
+                    )
                 )
-            )
 
-        # Wait for both to complete
-        docs_query_only = future_query_only.result()
-        docs_query_plus_history = future_query_plus_history.result()
+                combined_query = f"{query} {history}"
+                future_query_plus_history = executor.submit(
+                    lambda: vectorstore.max_marginal_relevance_search_by_vector(
+                        embeddings.embed_query(combined_query), k=10, fetch_k=20
+                    )
+                )
 
-        # Step 3: Merge and de-duplicate documents
-        combined_docs = docs_query_only + docs_query_plus_history
-        unique_docs = []
-        seen_hashes = set()
-        for doc in combined_docs:
-            content_hash = hash(doc.page_content)
-            if content_hash not in seen_hashes:
-                unique_docs.append(doc)
-                seen_hashes.add(content_hash)
+                docs_query_only = future_query_only.result()
+                docs_query_plus_history = future_query_plus_history.result()
+
+            # Merge and deduplicate by page content
+            combined_docs = docs_query_only + docs_query_plus_history
+            seen_hashes = set()
+            unique_docs = []
+            for doc in combined_docs:
+                content_hash = hash(doc.page_content)
+                if content_hash not in seen_hashes:
+                    seen_hashes.add(content_hash)
+                    unique_docs.append(doc)
 
         # Step 4: Pass question and context into qa_chain
         result = qa_chain.invoke({"question": full_query, "context": unique_docs})
-    
+        
         # Normalize response
-        if isinstance(result, dict) and "result" in result:
-            raw_response = result["result"].strip()
+        if isinstance(result, AIMessage):
+            raw_response = result.content.strip()
+
+        elif isinstance(result, dict) and "result" in result:
+            inner = result["result"]
+            if isinstance(inner, AIMessage):
+                raw_response = inner.content.strip()
+            elif isinstance(inner, str):
+                raw_response = inner.strip()
+            else:
+                raise TypeError(f"Unsupported type for result['result']: {type(inner)}")
+
         elif isinstance(result, str):
             raw_response = result.strip()
+
         else:
+            raise TypeError(f"Unexpected result type: {type(result)}")
+
             logging.error(f"Unexpected response format from model: {result}")
             return (
                 jsonify(

@@ -7,7 +7,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from langchain.docstore.document import Document
-from langchain.chains import LLMChain
+# from langchain.chains import LLMChain 
+from langchain_core.runnables import RunnableMap
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain.prompts import PromptTemplate
@@ -33,6 +34,12 @@ Instructions:
 - Prioritize official HCLSoftware product, solution, and service pages.
 - If they ask about HCL products, provide detailed and informative responses.
 - If the user greets, respond meaningfully.
+- Analyze the provided context and question deeply before answering.
+- provide a more detailed explanation of the topic.
+    - Use **professional language** and **technical terminology** relevant to HCLSoftware products and services.
+    - Use **concise, clear, and informative** language to convey your message effectively.
+    - Avoid unnecessary jargon or overly complex language.
+    
 - If a scenario is given, understand the intent and suggest suitable HCL products based on the context.
 - If the query includes blog then refer to the blog context.
 - Avoid stating that something is "not related to HCLSoftware" unless it clearly isn’t.
@@ -63,6 +70,7 @@ Instructions:
 **References**
 - Maximum 4 links
 - Must include one **Contact Us** or support link if applicable
+- Must include Final Source document URL's in references
 - Must be directly relevant, unique, and from HCLSoftware
 - Provide free trails if available and demo references of HCL Product if the HCL product in question.
 - Blog links only when no better product/solution link is found
@@ -134,24 +142,25 @@ def chunk_documents(documents, batch_size):
         yield documents[i : i + batch_size]
 
 def create_document(entry_id, section, content_data):
-            if content_data is None or not isinstance(content_data, dict):
-                logging.warning(f"Skipping entry {entry_id} with unknown source URL")
-                return None
-            source_url = content_data.get("source_page_url", "unknown")
-            page_text = content_data.get("page_text", "unknown")
-            page_title = content_data.get("title", "unknown")
-            page_description = content_data.get("description", "unknown")
-            page_content = f"[Source: {source_url}]\n\n{page_text}"
-            return Document(
-                page_content=page_content,
-                metadata={
-                    "source": source_url,
-                    "title": page_title,
-                    "description": page_description,
-                    "section": section,
-                    "entry_id": entry_id,
-                },
-            )
+    if content_data is None or not isinstance(content_data, dict):
+        logging.warning(f"Skipping entry {entry_id} with unknown source URL")
+        return None
+    source_url = content_data.get("source_page_url", "unknown")
+    page_text = content_data.get("page_text", "unknown")
+    page_title = content_data.get("title", "unknown")
+    page_description = content_data.get("description", "unknown")
+    page_content = f"[Source: {source_url}]\n\n{page_text}"
+    return Document(
+        page_content=page_content,
+        metadata={
+            "source": source_url,
+            "title": page_title,
+            "description": page_description,
+            "section": section,
+            "entry_id": entry_id,
+        },
+    )
+ 
 def embed_documents_in_batches(
     documents, embeddings, persist_dir, batch_size=100, delay=45
 ):
@@ -247,11 +256,8 @@ def load_model_data(
         model="gemini-2.0-flash", temperature=0.3, google_api_key=google_api_key
     )
 
-    qa_chain = LLMChain(
-        llm=llm,
-        prompt=prompt_template,
-        verbose=False,
-        output_key="result", 
-    )
+    qa_chain = RunnableMap({
+        "result": prompt_template | llm
+    })
     logging.info("QA chain loaded successfully.")
     return qa_chain, vectorstore, docs_vectorstore, videos_vectorstore, embeddings
