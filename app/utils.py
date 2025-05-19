@@ -1,8 +1,12 @@
 import concurrent.futures
 import json
 import logging
+import os
 import re
+from datetime import datetime
+import threading
 from urllib.parse import urljoin, urlparse, parse_qs
+
 
 import requests
 from bs4 import BeautifulSoup
@@ -350,3 +354,45 @@ def validate_document_url(url: str) -> bool:
 
     except requests.RequestException:
         return False
+
+def store_query_with_timestamp(query: str, timestamp: str, file_path: str = "query_history.json") -> None:
+    """
+    Appends a query with a provided timestamp to a JSON file.
+    If the file does not exist, it will be created.
+
+    Args:
+        query (str): The user query to store.
+        timestamp (str): The timestamp in string format (e.g., '2025-05-19 14:33:00').
+        file_path (str): Path to the JSON file. Defaults to 'query_history.json'.
+    """
+    entry = {
+        "query": query,
+        "timestamp": timestamp
+    }
+
+    data = []
+
+    # Try loading existing data if file exists
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r") as file:
+                data = json.load(file)
+        except (json.JSONDecodeError, FileNotFoundError):
+            # If the file is empty or invalid JSON, start fresh
+            data = []
+
+    # Append new entry
+    data.append(entry)
+
+    # Write data back to file (creates file if it doesn't exist)
+    with open(file_path, "w") as file:
+        json.dump(data, file, indent=4)
+        
+
+def log_query_in_background(query: str, file_path: str = "query_history.json"):
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    threading.Thread(
+        target=store_query_with_timestamp,
+        args=(query, timestamp, file_path),
+        daemon=True
+    ).start()

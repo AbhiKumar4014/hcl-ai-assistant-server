@@ -6,6 +6,7 @@ import logging
 from flask import Flask, json, request, jsonify
 from flask_cors import CORS
 from langchain_core.messages import AIMessage
+import json
 
 from load_page_urls import *
 from load_data import *
@@ -127,6 +128,9 @@ def ask():
             500,
         )
 
+    # Storing the query with date in file
+    log_query_in_background(query)
+        
     # Combine history with the current query if provided
     full_query = (
         f"{query}\n\n[Previous three conversation:\n{history}]" if history else query
