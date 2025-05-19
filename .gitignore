@@ -9,3 +9,4 @@ __pycache__/
 /venv
 *.zip
 docs.json
+query_history.json
