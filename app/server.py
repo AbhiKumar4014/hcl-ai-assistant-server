@@ -1,7 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 import re
 import base64
-import logging
 
 from flask import Flask, json, request, jsonify
 from flask_cors import CORS
@@ -12,22 +11,29 @@ from load_page_urls import *
 from load_data import *
 from utils import *
 from document_video_processor import append_valid_documents_and_videos
+from log import setup_loggers
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+request_logger, dev_logger = setup_loggers()
 
+# Set up Flask app
 app = Flask(__name__)
 CORS(app)  # Enable CORS
 
 # For backup
-# qa_chain, docs_vectorstore, videos_vectorstore, embeddings = load_model_data(source_type="json_file", source_data="hcl_sites_data.json")
+# qa_chain, vectorstore, docs_vectorstore, videos_vectorstore, embeddings = load_model_data(source_type="json_file", source_data="hcl_sites_data.json")
 
 qa_chain, vectorstore, docs_vectorstore, videos_vectorstore, embeddings = (
     load_model_data()
 )
 
+
+# Log incoming requests
+@app.before_request
+def log_request_info():
+    request_logger.info(f"Incoming request: {request.method} {request.path} Headers: {dict(request.headers)} Body: {request.get_data(as_text=True)}")
+    # if request.get_data():
+    #     request_logger.info(f"Body: {request.get_data(as_text=True)}")
 
 @app.route("/query/health-check", methods=["GET"])
 def healthcheck():
@@ -53,10 +59,10 @@ def healthcheck():
 
 @app.route("/query/load", methods=["POST"])
 def load():
-    global qa_chain
+    global qa_chain, vectorstore, docs_vectorstore, videos_vectorstore, embeddings
     data = request.get_json()
     if not data or "sitemap_urls" not in data:
-        logging.warning("Missing 'sitemap_url' in request body")
+        dev_logger.warning("Missing 'sitemap_url' in request body")
         return jsonify({"error": "Missing 'sitemap_url' in request body"}), 400
 
     sitemap_data = data["sitemap_urls"]
@@ -72,14 +78,15 @@ def load():
             400,
         )
 
-    logging.info("Load requested")
+    dev_logger.info("Load requested")
 
     hcl_urls = load_hcl_sitemap(sitemap_urls)  # Load HCL sitemap URLs
     if not hcl_urls:
-        logging.error("Failed to load HCL sitemap URLs")
-        return jsonify(
-            {"error": "Failed to load HCL sitemap URLs or no URLs found"}
-        ), 400
+        dev_logger.error("Failed to load HCL sitemap URLs")
+        return (
+            jsonify({"error": "Failed to load HCL sitemap URLs or no URLs found"}),
+            400,
+        )
 
     context = extract_all_text_parallel(hcl_urls)  # Extract text from HCL URLs
 
@@ -92,13 +99,15 @@ def load():
         json.dump(context, file)
 
     # Load the model with the context
-    qa_chain = load_model_data(context, source_type="json_object")
+    qa_chain, vectorstore, docs_vectorstore, videos_vectorstore, embeddings = (
+        load_model_data(context, source_type="json_object")
+    )
 
     if qa_chain is not None:
-        logging.info("Model loaded successfully")
+        dev_logger.info("Model loaded successfully")
         return jsonify({"message": "Model loaded successfully"})
     else:
-        logging.error("Failed to load model")
+        dev_logger.error("Failed to load model")
         return jsonify({"error": "Failed to load model"}), 500
 
 
@@ -110,15 +119,21 @@ def ask():
     data = request.get_json()
     query = data.get("query") if data else None
     history = data.get("history", "") if data else ""
+    regenerate = data.get("regenerate", "") if data else ""
 
+    query = (
+        f"{query.strip()} in {regenerate.strip()} way".strip()
+        if regenerate.strip()
+        else query.strip()
+    )
     # Validate query
     if not query:
-        logging.warning("Missing 'query' parameter")
+        dev_logger.warning("Missing 'query' parameter")
         return jsonify({"error": "Missing 'query' parameter"}), 400
 
     # Check QA chain
     if qa_chain is None:
-        logging.error("QA chain is not initialized")
+        dev_logger.error("QA chain is not initialized")
         return (
             jsonify(
                 {
@@ -130,7 +145,7 @@ def ask():
 
     # Storing the query with date in file
     log_query_in_background(query)
-        
+
     # Combine history with the current query if provided
     full_query = (
         f"{query}\n\n[Previous three conversation:\n{history}]" if history else query
@@ -173,7 +188,7 @@ def ask():
 
         # Step 4: Pass question and context into qa_chain
         result = qa_chain.invoke({"question": full_query, "context": unique_docs})
-        
+
         # Normalize response
         if isinstance(result, AIMessage):
             raw_response = result.content.strip()
@@ -193,7 +208,7 @@ def ask():
         else:
             raise TypeError(f"Unexpected result type: {type(result)}")
 
-            logging.error(f"Unexpected response format from model: {result}")
+            dev_logger.error(f"Unexpected response format from model: {result}")
             return (
                 jsonify(
                     {
@@ -221,7 +236,7 @@ def ask():
         return jsonify(parsed)
 
     except json.JSONDecodeError as json_err:
-        logging.warning(
+        dev_logger.warning(
             f"Primary JSON decode failed: {json_err}. \n Attempting fallback extraction"
         )
 
@@ -273,7 +288,7 @@ def ask():
                 try:
                     references = json.loads(references_match.group(1))
                 except json.JSONDecodeError:
-                    logging.warning("Could not parse `references` field")
+                    dev_logger.warning("Could not parse `references` field")
 
             # Extract "videos" array
             videos_match = re.search(r'"videos"\s*:\s*(\[[\s\S]*?\])', raw_response)
@@ -281,7 +296,7 @@ def ask():
                 try:
                     videos = json.loads(videos_match.group(1))
                 except json.JSONDecodeError:
-                    logging.warning("Could not parse `videos` field")
+                    dev_logger.warning("Could not parse `videos` field")
 
             # Extract "documents" array
             documents_match = re.search(
@@ -291,7 +306,7 @@ def ask():
                 try:
                     documents = json.loads(documents_match.group(1))
                 except json.JSONDecodeError:
-                    logging.warning("Could not parse `documents` field")
+                    dev_logger.warning("Could not parse `documents` field")
 
             final_response = {
                 "answer": answer,
@@ -313,7 +328,7 @@ def ask():
             return jsonify(final_response), 200
 
         except Exception as extract_err:
-            logging.error(f"Manual fallback also failed: {extract_err}")
+            dev_logger.error(f"Manual fallback also failed: {extract_err}")
             return (
                 jsonify(
                     {
@@ -326,7 +341,7 @@ def ask():
             )
 
     except Exception as e:
-        logging.exception("Unexpected error during ask")
+        dev_logger.exception("Unexpected error during ask")
         return (
             jsonify(
                 {
@@ -377,4 +392,5 @@ def call_chatbot_api():
 
 
 if __name__ == "__main__":
+    dev_logger.info("Starting server...")
     app.run(host="0.0.0.0", port=3000, debug=True)

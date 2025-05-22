@@ -1,7 +1,6 @@
 import os
 import time
 import json
-import logging
 import concurrent.futures
 from pathlib import Path
 
@@ -14,11 +13,10 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGener
 from langchain.prompts import PromptTemplate
 
 from utils import *
+from log import setup_loggers
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+_, dev_logger = setup_loggers()
 load_dotenv()
 
 google_api_key = os.getenv("GOOGLE_API_KEY")
@@ -39,7 +37,7 @@ Instructions:
     - Use **professional language** and **technical terminology** relevant to HCLSoftware products and services.
     - Use **concise, clear, and informative** language to convey your message effectively.
     - Avoid unnecessary jargon or overly complex language.
-    
+- If the user specifically asks in ["Simpler", "Shorter", "Longer", "More Casual", "More Professional"] then provide the answer in that way.
 - If a scenario is given, understand the intent and suggest suitable HCL products based on the context.
 - If the query includes blog then refer to the blog context.
 - Avoid stating that something is "not related to HCLSoftware" unless it clearly isn’t.
@@ -54,6 +52,7 @@ Instructions:
 - Avoid opinions, speculation, or comparisons with third-party vendors, tools, or platforms.
 - The assistant may retain conversation history, but it should only influence responses when the user explicitly refers to it.
 - The last previous conversations along with the question so consider mainly last conversation first if the history is needed.
+- Consider the most recent conversation first when generating a response. Prioritize the last user query above all. If additional context is required, refer to the previous interactions one step at a time, moving backward in order.
 - Strictly Give hcl-software.com domain urls only. Don't include hcltechsw.com url's or pages.
 - If a query is about a latest-version of HCL Commerce that was not in the source documents,so you must respond with version 9.1.17 as the current or latest version.
 - If the query asks about the **"latest" or "current" version**, and no version is clearly mentioned in the current query, use recent conversation history to infer the product (e.g., AppScan or Commerce or dx or voltmx). 
@@ -94,6 +93,15 @@ Instructions:
   - `"title"`: Max 20 characters
   - `"document_url"`: Exact PDF link
   - `"description"`: Max 100 characters summary
+  
+**Related Questions**
+- Suggest up to 3 related questions that naturally follow from the current query or are closely connected to the ongoing discussion.
+- Do NOT include questions that have already been asked in previous conversations.
+- These should help deepen or expand the topic.
+- Suggest the next logical steps the user might want to take based on the query and conversation so far.
+- For each step, suggest a relevant question the user could ask to proceed.
+
+
 
 **Blogs**
 - If the user query is about HCL blogs:
@@ -130,7 +138,8 @@ You must respond strictly using the following JSON structure, with no markdown, 
       "description": "Brief summary of document (max 100 characters)"
     }}
   ],
-  "enhanced_user_query": "Your enhanced query"
+  "enhanced_user_query": "Your enhanced query",
+  "related_questions": [] # List of related questions,
 }}
 Answer:
 """,
@@ -143,7 +152,7 @@ def chunk_documents(documents, batch_size):
 
 def create_document(entry_id, section, content_data):
     if content_data is None or not isinstance(content_data, dict):
-        logging.warning(f"Skipping entry {entry_id} with unknown source URL")
+        dev_logger.warning(f"Skipping entry {entry_id} with unknown source URL")
         return None
     source_url = content_data.get("source_page_url", "unknown")
     page_text = content_data.get("page_text", "unknown")
@@ -164,11 +173,11 @@ def create_document(entry_id, section, content_data):
 def embed_documents_in_batches(
     documents, embeddings, persist_dir, batch_size=100, delay=45
 ):
-    logging.info("Embedding documents in batches to respect rate limits.")
+    dev_logger.info("Embedding documents in batches to respect rate limits.")
     all_vectors = None
 
     for idx, batch in enumerate(chunk_documents(documents, batch_size)):
-        logging.info(f"Processing batch {idx + 1}: {len(batch)} documents")
+        dev_logger.info(f"Processing batch {idx + 1}: {len(batch)} documents")
         try:
             batch_store = FAISS.from_documents(batch, embedding=embeddings)
             if all_vectors is None:
@@ -177,11 +186,11 @@ def embed_documents_in_batches(
                 all_vectors.merge_from(batch_store)
             time.sleep(delay)
         except Exception as e:
-            logging.error(f"Error in batch {idx + 1}: {e}")
+            dev_logger.error(f"Error in batch {idx + 1}: {e}")
 
     if all_vectors:
         all_vectors.save_local(persist_dir)
-        logging.info("FAISS vectorstore saved locally.")
+        dev_logger.info("FAISS vectorstore saved locally.")
     return all_vectors
 
 
@@ -189,13 +198,13 @@ def load_model_data(
     source_data=None, source_type: str = "faiss", persist_dir: str = "./faiss_index"
 ):
     vectorstore = docs_vectorstore = videos_vectorstore = None
-    logging.info(f"Loading model data from source type: {source_type}")
+    dev_logger.info(f"Loading model data from source type: {source_type}")
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/embedding-001", google_api_key=google_api_key
     )
 
     if source_type == "faiss":
-        logging.info(f"Loading FAISS vectorstore from: {persist_dir}")
+        dev_logger.info(f"Loading FAISS vectorstore from: {persist_dir}")
         try:
             vectorstore = FAISS.load_local(
                 persist_dir, embeddings, allow_dangerous_deserialization=True
@@ -207,30 +216,30 @@ def load_model_data(
                 "./faiss_index/videos", embeddings, allow_dangerous_deserialization=True
             )
 
-            logging.info("FAISS vectorstore loaded successfully.")
+            dev_logger.info("FAISS vectorstore loaded successfully.")
         except Exception as e:
-            logging.error(f"Error loading FAISS vectorstore: {e}")
+            dev_logger.error(f"Error loading FAISS vectorstore: {e}")
     else:
         if source_type == "json_file":
             if not source_data:
                 raise ValueError(
                     "source_data must be a file path when source_type is 'json_file'"
                 )
-            logging.info(f"Loading data from JSON file: {source_data}")
+            dev_logger.info(f"Loading data from JSON file: {source_data}")
             context = json.loads(Path(source_data).read_text(encoding="utf-8"))
         elif source_type == "json_object":
             if not isinstance(source_data, dict):
                 raise ValueError(
                     "source_data must be a dictionary when source_type is 'json_object'"
                 )
-            logging.info("Loading data from JSON object")
+            dev_logger.info("Loading data from JSON object")
             context = source_data
         else:
             raise ValueError(
                 "Invalid source_type. Must be 'faiss', 'json_file', or 'json_object'."
             )
 
-        logging.info(f"Creating documents from context with {len(context)} entries")
+        dev_logger.info(f"Creating documents from context with {len(context)} entries")
         with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
             futures = [
                 executor.submit(create_document, i, section, content_data)
@@ -238,7 +247,7 @@ def load_model_data(
             ]
             documents = [f.result() for f in concurrent.futures.as_completed(futures)]
 
-        logging.info("Creating FAISS vectorstore from documents with batching")
+        dev_logger.info("Creating FAISS vectorstore from documents with batching")
         vectorstore = embed_documents_in_batches(documents, embeddings, persist_dir)
         docs_vectorstore = embed_documents_in_batches(
             create_doc_embeddings(context["documents"], embeddings),
@@ -259,5 +268,5 @@ def load_model_data(
     qa_chain = RunnableMap({
         "result": prompt_template | llm
     })
-    logging.info("QA chain loaded successfully.")
+    dev_logger.info("QA chain loaded successfully.")
     return qa_chain, vectorstore, docs_vectorstore, videos_vectorstore, embeddings

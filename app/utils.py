@@ -1,6 +1,5 @@
 import concurrent.futures
 import json
-import logging
 import os
 import re
 from datetime import datetime
@@ -13,11 +12,10 @@ from bs4 import BeautifulSoup
 from rapidfuzz import fuzz
 import scrapetube
 from langchain.schema import Document
+from log import setup_loggers
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+_, dev_logger = setup_loggers()
 
 
 def extract_text_from_url(url: str) -> dict:
@@ -67,7 +65,7 @@ def extract_text_from_url(url: str) -> dict:
         }
 
     except Exception as e:
-        logging.error(f"Error extracting text from URL: {url} - {e}")
+        dev_logger.error(f"Error extracting text from URL: {url} - {e}")
         return None
 
 
@@ -111,7 +109,7 @@ def fetch_attachment_links(api_url: str, base_url: str) -> list[dict]:
         return result
 
     except Exception as e:
-        logging.error("Error: in except", e)
+        dev_logger.error("Error: in except", e)
         return []
 
 
@@ -122,7 +120,7 @@ def extract_all_doc_urls() -> dict:
         documents_urls = json.load(file)
     if documents_urls:
         for endpoint, url in documents_urls.items():
-            logging.info("Extracting")
+            dev_logger.info("Extracting")
             data = fetch_attachment_links(url, BASE_URL)
             if data:
                 response[endpoint] = data
@@ -138,10 +136,10 @@ def is_youtube_video_valid(url: str) -> tuple[bool, str]:
             thumbnail_url = data.get("thumbnail_url", "")
             return True, thumbnail_url
         else:
-            logging.warning("Invalid YouTube video URL: %s", url)
+            dev_logger.warning("Invalid YouTube video URL: %s", url)
             return False, ""
     except requests.RequestException as e:
-        logging.error(f"Error checking YouTube video '{url}': {e}")
+        dev_logger.error(f"Error checking YouTube video '{url}': {e}")
         return False, ""
 
 

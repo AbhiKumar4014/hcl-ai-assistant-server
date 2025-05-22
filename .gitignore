@@ -10,3 +10,4 @@ __pycache__/
 *.zip
 docs.json
 query_history.json
+*.log

@@ -1,9 +1,9 @@
 import requests
 import xml.etree.ElementTree as ET
-import logging
+from log import setup_loggers
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+_, dev_logger = setup_loggers()
 
 def load_hcl_sitemap(sitemap_urls):
     # sitemap_urls = [
@@ -17,17 +17,17 @@ def load_hcl_sitemap(sitemap_urls):
 
     for sitemap_url in sitemap_urls:
         try:
-            logging.info(f"Fetching sitemap from: {sitemap_url}")
+            dev_logger.info(f"Fetching sitemap from: {sitemap_url}")
             response = requests.get(sitemap_url)
             response.raise_for_status()
         except requests.RequestException as e:
-            logging.error(f"Failed to fetch sitemap: {sitemap_url}, error: {e}")
+            dev_logger.error(f"Failed to fetch sitemap: {sitemap_url}, error: {e}")
             continue  # Skip this sitemap and move on
 
         try:
             root = ET.fromstring(response.content)
         except ET.ParseError as e:
-            logging.error(f"Failed to parse sitemap XML: {sitemap_url}, error: {e}")
+            dev_logger.error(f"Failed to parse sitemap XML: {sitemap_url}, error: {e}")
             continue
 
         for url in root.findall("ns:url", namespaces=namespace):
